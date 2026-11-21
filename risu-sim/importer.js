@@ -719,9 +719,9 @@
 
   var IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|avif|bmp|apng|svg)$/i;
   var ASSET_LIMITS = {
-    file: 8 * 1024 * 1024, // 파일 하나
-    total: 48 * 1024 * 1024, // 전체
-    count: 200
+    file: 16 * 1024 * 1024, // 파일 하나
+    total: 128 * 1024 * 1024, // 전체
+    count: 800
   };
 
   function mimeOf(name) {
@@ -774,7 +774,16 @@
         }
         this.total += bytes.length;
         this.count++;
-        var rec = { mime: mimeOf(path || name), b64: bytesToB64(bytes), path: path || '', icon: false };
+        // base64 로 미리 바꾸지 않는다 (메모리 1.33배 + 거대한 문자열).
+        // 브라우저는 bytes 로 바로 blob 을 만들고, Node 테스트만 b64 를 지연 계산한다.
+        var rec = { mime: mimeOf(path || name), bytes: bytes, path: path || '', icon: false };
+        Object.defineProperty(rec, 'b64', {
+          configurable: true,
+          enumerable: false,
+          get: function () {
+            return bytesToB64(bytes);
+          }
+        });
         if (this.map[key] == null) this.map[key] = rec;
         if (path && this.map[String(path).toLocaleLowerCase()] == null) {
           this.map[String(path).toLocaleLowerCase()] = rec;
@@ -1121,6 +1130,39 @@
     throw new Error('캐릭터 카드 형식이 아닙니다 (spec: chara_card_v2/v3 필요)');
   }
 
+  /**
+   * util.ts:989 parseKeyValue — `key=value` 줄바꿈 형식.
+   * JSON(`{...}`)으로 내보낸 카드도 있어서 둘 다 받는다.
+   */
+  function parseDefaultVariables(text, warnings) {
+    var out = {};
+    if (text == null || text === '') return out;
+    if (typeof text === 'object') return Object.assign({}, text);
+    var str = String(text).trim();
+    if (!str) return out;
+    if (str.charAt(0) === '{') {
+      try {
+        return JSON.parse(str);
+      } catch (e) {
+        /* key=value 로 재시도 */
+      }
+    }
+    var n = 0;
+    String(text)
+      .split('\n')
+      .forEach(function (line) {
+        var i = line.indexOf('=');
+        if (i <= 0) return;
+        var k = line.slice(0, i).trim();
+        var v = line.slice(i + 1).trim();
+        if (!k) return;
+        out[k] = v;
+        n++;
+      });
+    if (!n && warnings) warnings.push('defaultVariables 형식을 해석하지 못했습니다: ' + str.slice(0, 40));
+    return out;
+  }
+
   /** character_book → 간단한 로어 목록 (시뮬레이터에서는 표시용) */
   function summarizeLorebook(book) {
     if (!book || !Array.isArray(book.entries)) return [];
@@ -1278,17 +1320,7 @@
   function normalizePreset(preset, meta) {
     var warnings = (meta && meta.warnings) || [];
     var regex = Array.isArray(preset.regex) ? preset.regex : [];
-    var vars = {};
-    var rawVars = preset.templateDefaultVariables;
-    if (typeof rawVars === 'string' && rawVars.trim()) {
-      try {
-        vars = JSON.parse(rawVars);
-      } catch (e) {
-        warnings.push('templateDefaultVariables 가 JSON 이 아닙니다');
-      }
-    } else if (rawVars && typeof rawVars === 'object') {
-      vars = rawVars;
-    }
+    var vars = parseDefaultVariables(preset.templateDefaultVariables, warnings);
 
     if (preset.presetVersion && preset.presetVersion >= 3) {
       warnings.push('NAI 프리셋(presetVersion ' + preset.presetVersion + ')입니다 — 정규식이 없을 수 있습니다');
@@ -1520,7 +1552,10 @@
           normalized.lorebookOverride = md.lorebook;
         }
         if (md.name) normalized.name = normalized.name || md.name;
-        warnings.push('module.risum 을 발견해 정규식/트리거를 그것으로 대체했습니다 (원본 동작)');
+        warnings.push(
+          '정규식·트리거를 charx 안의 module.risum 에서 가져왔습니다 ' +
+            '(RisuAI 는 charx 로 내보낼 때 card.json 대신 여기에 넣습니다)'
+        );
       }
       warnings = warnings.concat(innerWarnings);
 
@@ -1533,7 +1568,11 @@
         })
         .then(function () {
           if (inner && inner.module) fillFromRisumAssets(inner.module, inner.rawAssets || [], bag);
-          if (bag.skipped) warnings.push('에셋 ' + bag.skipped + '개는 크기/개수 제한으로 건너뛰었습니다');
+          if (bag.skipped) {
+            warnings.push(
+              '에셋 ' + bag.skipped + '개를 건너뛰었습니다 (파일 16MB / 전체 128MB / 800개 제한)'
+            );
+          }
           return bag.map;
         })
         .then(function (assetsData) {
@@ -1587,16 +1626,7 @@
       }
     }
 
-    var vars = {};
-    if (typeof n.defaultVariables === 'string' && n.defaultVariables.trim()) {
-      try {
-        vars = JSON.parse(n.defaultVariables);
-      } catch (e) {
-        warnings.push('defaultVariables 가 JSON 이 아닙니다');
-      }
-    } else if (n.defaultVariables && typeof n.defaultVariables === 'object') {
-      vars = n.defaultVariables;
-    }
+    var vars = parseDefaultVariables(n.defaultVariables, warnings);
 
     var subtitleBits = [n.spec === 'chara_card_v3' ? 'CCv3' : n.spec === 'chara_card_v2' ? 'CCv2' : n.spec];
     subtitleBits.push('정규식 ' + n.customScripts.length);

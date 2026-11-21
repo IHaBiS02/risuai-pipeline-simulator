@@ -19,7 +19,7 @@
       "flag": "g,<order 5>"
     }
   ],
-  "templateDefaultVariables": "{\"hp\":\"77\",\"toggle_flag\":\"1\"}",
+  "templateDefaultVariables": "hp=77\ntoggle_flag=1",
   "temperature": 80,
   "promptTemplate": [
     {

@@ -1305,9 +1305,10 @@
           assetUrls[k] = a.url;
           return;
         }
-        if (!a.b64) return;
+        var buf = a.bytes || (a.b64 ? b64ToBytes(a.b64) : null);
+        if (!buf) return;
         try {
-          var url = URL.createObjectURL(new Blob([b64ToBytes(a.b64)], { type: a.mime || 'application/octet-stream' }));
+          var url = URL.createObjectURL(new Blob([buf], { type: a.mime || 'application/octet-stream' }));
           assetUrls[k] = url;
           assetUrlList.push(url);
         } catch (e) {

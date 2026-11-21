@@ -34,7 +34,7 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 │   ├── lua-runtime.js            # Lua (wasmoon)
 │   ├── trigger-runtime.js        # 트리거 VM
 │   ├── asset-runtime.js          # 동적 에셋 (OpenAI 호환 임베딩)
-│   ├── test.js                   # 단위 테스트 125개
+│   ├── test.js                   # 단위 테스트 129개
 │   ├── tools/                    # 픽스처 생성기 · 브라우저 UI 테스트 · 목 임베딩 서버
 │   └── vendor/                   # wasmoon, json.lua (오프라인 동작용)
 ├── LICENSE                       # GPL-3.0
@@ -61,7 +61,7 @@ python3 -m http.server 8080
 
 ```bash
 cd risu-sim && node test.js
-# → 125 passed, 0 failed
+# → 129 passed, 0 failed
 
 # 브라우저 UI 통합 테스트 (파일 주입 + 클릭 100개 항목)
 python3 -m http.server 8901 &

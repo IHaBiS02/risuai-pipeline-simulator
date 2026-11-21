@@ -222,7 +222,7 @@ const PRESET = {
       flag: 'g,<order 5>'
     }
   ],
-  templateDefaultVariables: '{"hp":"77","toggle_flag":"1"}',
+  templateDefaultVariables: 'hp=77\ntoggle_flag=1',
   temperature: 80,
   promptTemplate: [{ type: 'plain', type2: 'main', text: 'You are {{char}}.', role: 'system' }]
 };
@@ -287,7 +287,7 @@ const BOT_CARD = {
             effect: [{ type: 'v2ConsoleLog', source: 'hi', sourceType: 'value', indent: 0 }]
           }
         ],
-        defaultVariables: '{"hp":"42"}',
+        defaultVariables: 'hp=42',
         additionalAssets: [
           ['smile_happy.png', '', 'png'],
           ['angry.png', '', 'png']
@@ -484,7 +484,7 @@ async function main() {
             }
           ],
           toggles: 'cot=CoT 로그\ntone=톤=select=밝게,어둡게\nnote=메모=text',
-          defaultVariables: '{"view":"normal","closed":"1","reveal":"yes"}',
+          defaultVariables: 'view=normal\nclosed=1\nreveal=yes',
           additionalAssets: [['banner', '', 'png']]
         }
       },

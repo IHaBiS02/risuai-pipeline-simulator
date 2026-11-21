@@ -12,7 +12,7 @@ risu-sim/
 ├── asset-runtime.js    동적 에셋 (OpenAI 호환 /embeddings)
 ├── trigger-runtime.js  트리거 VM (조건 / indent 인터프리터 / 35 effect)
 ├── ADDING-RUNTIMES.md  트리거·플러그인·동적 에셋 설계
-├── test.js             단위 테스트 125개 (node test.js)
+├── test.js             단위 테스트 129개 (node test.js)
 ├── tools/
 │   ├── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
 │   ├── make-fixtures.js    테스트용 실제 포맷 파일 생성기 (msgpackr + fflate)
@@ -69,6 +69,10 @@ cd risu-sim && python3 -m http.server 8080
 - **charx**: `module.risum` 이 있으면 그 안의 정규식·트리거로 **덮어씁니다**
   (`importCharacterProcess` 와 동일 — 실제 .charx 는 항상 이 구조입니다)
 - **봇의 `first_mes`** 가 **입력 텍스트**로 들어갑니다 (채팅 내용)
+- `defaultVariables` 는 RisuAI 와 같은 **`key=value` 줄바꿈** 형식입니다 (`util.ts:989`).
+  `{...}` JSON 으로 내보낸 카드도 같이 받습니다.
+- `.charx` 는 정규식·트리거를 **`module.risum` 안에** 넣고 `card.json` 에서는 지웁니다
+  (`characterCards.ts:1546`). 그래서 불러올 때 `module.risum` 을 우선합니다 — 원본과 동일.
 - **모듈**은 여러 개 선택 가능하고, 합치는 순서는 **불러온 순서**(= `db.modules` 순서)입니다.
   원본 `getModuleByIds` 가 선택 순서가 아니라 `db.modules` 를 filter 하기 때문입니다.
 - **프리셋·봇은 라디오 1개 선택**, 여러 개를 올려도 하나만 적용됩니다.
@@ -199,7 +203,7 @@ caption / divider             → 라벨 / 구분선
   → `background:url({{raw::x}})` 같은 카드 CSS 도 그대로 동작
 - 아바타는 `type: 'icon'` 에셋 (보통 `main`) 을 사용
 - `assets/**` 중 카드가 이름으로 참조하지 않는 파일도 basename 으로 채워 둡니다
-- 제한: 파일 8MB / 전체 48MB / 200개 (넘으면 경고)
+- 제한: 파일 16MB / 전체 128MB / 800개 (넘으면 경고)
 
 ## After 렌더 (트레이스)
 
@@ -233,7 +237,7 @@ after  [RENDER · CBS]
 
 ```bash
 cd risu-sim && node test.js
-# → 125 passed, 0 failed
+# → 129 passed, 0 failed
 ```
 
 ## 트리거

@@ -462,6 +462,33 @@ console.log('\n[23] CBS #when — 중첩 {{...}} 피연산자');
   ), 'BOTH');
 }
 
+console.log('\n[23-b] defaultVariables — key=value (util.ts:989)');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'tools', 'fixtures', f)));
+
+  const c = await imp.load({ name: 'x.charx', data: read('fixture-cardui.charx') });
+  eq('key=value 파싱', JSON.stringify(c.vars), '{"view":"normal","closed":"1","reveal":"yes"}');
+
+  // JSON 형식도 계속 지원
+  const mk = (dv) => ({
+    spec: 'chara_card_v3', spec_version: '3.0',
+    data: {
+      name: 'V', description: '', first_mes: 'x', mes_example: '', creator_notes: '',
+      character_version: '1', tags: [], creator: '', alternate_greetings: [],
+      character_book: { entries: [] }, assets: [],
+      extensions: { risuai: { defaultVariables: dv } }
+    }
+  });
+  const j = await imp.load({ name: 'a.json', data: new TextEncoder().encode(JSON.stringify(mk('{"a":"1"}'))) });
+  eq('JSON 형식도 허용', j.vars.a, '1');
+  const kv = await imp.load({ name: 'b.json', data: new TextEncoder().encode(JSON.stringify(mk('a=1\nb=2'))) });
+  eq('key=value 여러 줄', JSON.stringify(kv.vars), '{"a":"1","b":"2"}');
+  const empty = await imp.load({ name: 'c.json', data: new TextEncoder().encode(JSON.stringify(mk(''))) });
+  eq('빈 defaultVariables 는 빈 객체', JSON.stringify(empty.vars), '{}');
+}
+
 console.log('\n[24] 에셋 이미지 — charx 바이트 추출 + srcOf');
 {
   const imp = require('./importer.js');
