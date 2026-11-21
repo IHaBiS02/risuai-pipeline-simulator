@@ -2,6 +2,10 @@
 
 RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고, 그 동작을 **정적 웹페이지에서 재현**하는 프로젝트입니다.
 
+### ▶ [`https://ihabis02.github.io/risuai-pipeline-simulator/`](https://ihabis02.github.io/risuai-pipeline-simulator/)
+
+빌드 없이 바로 실행되는 라이브 데모입니다.
+
 - 정규식 스크립트(프리셋 / 봇 / 모듈)의 **실행 순서와 `<order N>` 정렬**
 - CBS `{{...}}` 전개, HTML/CSS 스코프(`.chattext` + `x-risu-`), DOMPurify 살균
 - **Lua** 편집 훅 (`listenEdit`) — wasmoon(Lua 5.4 WASM)
@@ -32,6 +36,8 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 ```
 
 ## 빠른 시작
+
+가장 빠른 방법은 위 라이브 데모를 여는 것입니다. 로컬에서 돌리려면:
 
 ```bash
 git clone https://github.com/IHaBiS02/risuai-pipeline-simulator.git
