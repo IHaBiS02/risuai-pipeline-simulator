@@ -5,20 +5,28 @@ RisuAI(`kwaroran/Risuai` @ `6db4b681`)의 **텍스트 변환 파이프라인**�
 
 ```
 risu-sim/
-├── index.html          UI (설정 · 트레이스 · 렌더 프리뷰)
-├── simulator.js        엔진 (CBS · 정규식 · CSS 스코프 · 새니타이저)
+├── index.html          UI (파일 불러오기 · 설정 · 트레이스 · 렌더 프리뷰)
+├── simulator.js        엔진 (CBS · 정규식 · CSS 스코프 · 새니타이저 · 표시 렌더)
+├── importer.js         파일 로더 (.risup · .charx · .module · .risum · .png · .json)
 ├── lua-runtime.js      Lua 레이어 (wasmoon, listenEdit 4종)
 ├── asset-runtime.js    동적 에셋 (OpenAI 호환 /embeddings)
 ├── trigger-runtime.js  트리거 VM (조건 / indent 인터프리터 / 35 effect)
 ├── ADDING-RUNTIMES.md  트리거·플러그인·동적 에셋 설계
-├── test.js             엔진 단위 테스트 17개 (node test.js)
+├── test.js             단위 테스트 89개 (node test.js)
 ├── tools/
-│   └── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
+│   ├── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
+│   ├── make-fixtures.js    테스트용 실제 포맷 파일 생성기 (msgpackr + fflate)
+│   ├── fixtures/           위 스크립트로 만든 .risup / .charx / .module …
+│   ├── ui-test.html        브라우저 UI 통합 테스트 65개 (iframe 안에서 실제 클릭)
+│   └── shot.html           스크린샷 촬영용 페이지
 ├── vendor/
 │   ├── wasmoon/        Lua 5.4 WASM 런타임 (index.js + glue.wasm)
 │   └── lua/json.lua    RisuAI 가 쓰는 json 라이브러리
+├── shot-import.png     파일 불러오기 + 트레이스
+├── shot-after.png      After 렌더 (중간 단계)
+├── shot-preview.png    채팅 프리뷰
 ├── shot-trace.png      트레이스 화면 예시 (Lua)
-├── shot-preview.png    렌더 프리뷰 예시
+├── shot-trigger.png    트리거 발화 예시
 └── shot-assets.png     동적 에셋 화면 예시
 ```
 
@@ -35,11 +43,87 @@ cd risu-sim && python3 -m http.server 8080
 
 `#trace`, `#preview`, `#css`, `#html`, `#vars` 해시로 탭을 바로 열 수 있습니다.
 
+## 파일 불러오기
+
+`.risup` 프리셋 / `.charx` 봇 카드 / `.module` 모듈을 그대로 읽습니다.
+별도 라이브러리 없이 브라우저 내장 API 만 씁니다 (`DecompressionStream`, `crypto.subtle`).
+
+| 확장자 | 들어가는 곳 | 포맷 | 푸는 순서 |
+|---|---|---|---|
+| `.risup` | 프리셋 | 프리셋 | `rpack` → zlib/gzip → msgpack → **AES-GCM** → msgpack |
+| `.risupreset` | 프리셋 | 구형 프리셋 | zlib/gzip → msgpack → **AES-GCM** → msgpack |
+| `.charx` | 봇 카드 (또는 모듈) | ZIP | `card.json`(CCv3) + `module.risum` + `assets/*` |
+| `.module` | 모듈 | ZIP (charx) | 위와 동일 — `exportModule` 이 charx 로 씁니다 |
+| `.risum` | 모듈 | 바이너리 | 매직 `111` → 버전 `0` → `[len][rpack JSON]` → 자산 → `0` |
+| `.png` | 봇 카드 | PNG | `tEXt`/`iTXt` 의 `ccv3`(V3) · `chara`(V2) = base64 JSON |
+| `.json` | 알아서 판별 | — | `type:'risuModule'` / `chara_card_v2·v3` / `type:'preset'` |
+
+원본과 같은 규칙을 지킵니다.
+
+- **프리셋**: `regex` → `db.presetRegex` (그래서 프리셋 정규식 칸에 들어감)
+- **봇 카드**: `extensions.risuai.customScripts` → 봇 정규식,
+  `triggerscript` 중 `effect[0].type === 'triggerlua'` 인 것만 **Lua 칸으로 분리**
+- **charx**: `module.risum` 이 있으면 그 안의 정규식·트리거로 **덮어씁니다**
+  (`importCharacterProcess` 와 동일 — 실제 .charx 는 항상 이 구조입니다)
+- **봇의 `first_mes`** 가 **입력 텍스트**로 들어갑니다 (채팅 내용)
+- **모듈**은 여러 개 선택 가능하고, 합치는 순서는 **불러온 순서**(= `db.modules` 순서)입니다.
+  원본 `getModuleByIds` 가 선택 순서가 아니라 `db.modules` 를 filter 하기 때문입니다.
+- **프리셋·봇은 라디오 1개 선택**, 여러 개를 올려도 하나만 적용됩니다.
+
+> **보안 컨텍스트 필요**: `.risup` 은 WebCrypto(AES-GCM)로 복호화합니다.
+> `https://` 또는 `http://localhost` 에서만 동작하고, `file://` 에서는 안 됩니다.
+
+### 실제 포맷으로 테스트하기
+
+`tools/fixtures/` 아래 파일들은 **RisuAI 가 쓰는 라이브러리(msgpackr, fflate)로 직접 생성**한
+진짜 포맷입니다. 생성기는 [`tools/make-fixtures.js`](tools/make-fixtures.js) 입니다.
+
+```bash
+npm i msgpackr@1.10.1 fflate@0.8.3   # 픽스처를 다시 만들 때만
+node risu-sim/tools/make-fixtures.js
+```
+
+### 브라우저 UI 테스트
+
+`tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
+65개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입).
+
+```bash
+cd risu-sim && python3 -m http.server 8901
+chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
+  --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
+# → <pre id="out">ALL PASS (65 checks)</pre>
+```
+
+## After 렌더 (트레이스)
+
+트레이스의 **after** 블록을 실제 채팅처럼 렌더링합니다.
+탭 바 오른쪽의 **After 렌더** / **CBS 전개** 체크박스로 켜고 끕니다.
+
+```
+after  [RENDER · CBS]
+┌──────────────────────────────────────────────┐
+│ *FixtureBot 가 고개를 든다.*                   │
+│ 안녕, User.                                   │
+│ HP: 42                                        │
+│ [ASSET smile_happy.png] [ASSET angry.png]     │
+└──────────────────────────────────────────────┘
+▸ 소스 보기
+```
+
+- **자산**: `{{asset::x}}` / `{{image::x}}` 등을 `parseAdditionalAssets` 처럼 해석합니다
+  (정확 일치 → 레벤슈타인 유사도). 이미지 바이트는 없으므로 종류·이름이 보이는 자리표시자로 나옵니다.
+- **카드 CSS**: 블록마다 스코프를 따로 줍니다 (`.simscope-N .x-risu-*`).
+  그래야 단계마다 다른 CSS 가 서로 섞이지 않습니다.
+- **CBS 전개**: 중간 단계의 after 에는 `{{char}}` 같은 CBS 가 아직 남아 있습니다
+  (CBS 는 파이프라인 ④). 켜면 미리보기용으로 한 번 더 전개합니다.
+  **소스 보기**는 항상 원문 그대로입니다.
+
 ## 테스트
 
 ```bash
 cd risu-sim && node test.js
-# → 17 passed, 0 failed
+# → 89 passed, 0 failed
 ```
 
 ## 트리거
@@ -129,7 +213,10 @@ python3 tools/mock-embeddings.py 8899
 | **트리거** — `runLLM`/`imgGen`/`command`/로어북 CRUD/alert | **스텁** (배지 표시) | — |
 | **동적 에셋** — 실행 조건 3개, 정확일치→레벤슈타인→임베딩, `bestMatchCache` | **1:1** | `scripts.ts:345-382` |
 | **자산 태그 해석** (`parseAdditionalAssets` 근사) | **근사** (이미지 대신 자리표시자) | `parser.svelte.ts:486-598` |
-| 트리거 VM / 플러그인 | **미탑재** (설계: [`ADDING-RUNTIMES.md`](ADDING-RUNTIMES.md)) | — |
+| **파일 불러오기** — `.risup` rpack/zlib/msgpack/AES-GCM, `.charx` ZIP, `.risum`, PNG `tEXt` | **1:1** | `database.svelte.ts:2385`, `modules.ts:125`, `characterCards.ts:61` |
+| **charx 의 `module.risum` 우선** (정규식·트리거 대체) | **1:1** | `characterCards.ts:158-167` |
+| **Lua 트리거 분리** (`effect[0]==='triggerlua'` → Lua 단계) | **1:1** | `scriptings.ts:1496-1512` |
+| 플러그인(CJS) | **미탑재** (설계: [`ADDING-RUNTIMES.md`](ADDING-RUNTIMES.md) §5) | — |
 
 ### 지원하는 CBS
 
@@ -149,12 +236,12 @@ python3 tools/mock-embeddings.py 8899
 
 | 항목 | 차이 | 이유 |
 |---|---|---|
-| Lua | 항상 생략 (트레이스에 "생략" 표시) | wasmoon(WASM) + Lua VM 필요 |
-| 트리거 / 플러그인 | 생략 | Svelte 스토어·iframe 호스트 필요 |
+| 플러그인(CJS) | 생략 | iframe 샌드박스 호스트 필요 (설계: [`ADDING-RUNTIMES.md`](ADDING-RUNTIMES.md) §5) |
 | `@@emo` | 감정 이미지 상태를 저장하지 않고 표시만 | 캐릭터 상태 저장소 없음 |
 | `@@inject` | 채팅 메시지에 쓰지 않고 본문에서만 제거 | 채팅 DB 없음 |
 | `@@repeat_back` | "직전 메시지" 입력 1건만 참조 | 채팅 히스토리 없음 |
-| 동적 에셋(`db.dynamicAssets`) | 미구현 | 임베딩 모델 필요 |
+| 로어북 발동 | 미구현 (불러와서 개수만 표시) | 스캔·토큰 계산 필요 |
+| 에셋 이미지 | 바이트 대신 자리표시자 | `saveAsset` 저장소 없음 |
 | 캐시(`processScriptCache`) | 미구현 | 결과에 영향 없음 |
 | `#when` 내부 CBS | 원본과 동일하게 **false 여도 실행** | `parser.svelte.ts:1737-1760` |
 | `#if` 내부 CBS | 원본과 동일하게 **false 면 미실행** | `parser.svelte.ts:1214-1224` |

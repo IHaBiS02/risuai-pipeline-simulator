@@ -11,6 +11,8 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 - **Lua** 편집 훅 (`listenEdit`) — wasmoon(Lua 5.4 WASM)
 - **트리거** VM — 조건 평가, indent 인터프리터, display/request allowlist
 - **동적 에셋** — OpenAI 호환 `/embeddings` 로 에셋 이름 유사도 매칭
+- **파일 불러오기** — `.risup` 프리셋 / `.charx` 봇 카드 / `.module` 모듈을 그대로 읽어서 적용
+- **After 렌더** — 트레이스의 각 단계 결과를 HTML·에셋·카드 CSS 까지 적용해 채팅처럼 표시
 
 빌드도, 서버도, 패키지 설치도 필요 없습니다. `risu-sim/index.html` 을 열면 바로 동작합니다.
 
@@ -25,11 +27,13 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 ├── RisuAI-pipeline-analysis.md   # 분석 문서 (1,200줄) — 10장 + 부록
 ├── risu-sim/                     # 실행 가능한 시뮬레이터 (정적 HTML)
 │   ├── index.html                # UI
-│   ├── simulator.js              # 정규식 · CBS · CSS 스코프 · 새니타이저
+│   ├── simulator.js              # 정규식 · CBS · CSS 스코프 · 새니타이저 · 표시 렌더
+│   ├── importer.js               # 파일 로더 (.risup · .charx · .module · .risum · .png)
 │   ├── lua-runtime.js            # Lua (wasmoon)
 │   ├── trigger-runtime.js        # 트리거 VM
 │   ├── asset-runtime.js          # 동적 에셋 (OpenAI 호환 임베딩)
-│   ├── test.js                   # 단위 테스트 35개
+│   ├── test.js                   # 단위 테스트 89개
+│   ├── tools/                    # 픽스처 생성기 · 브라우저 UI 테스트 · 목 임베딩 서버
 │   └── vendor/                   # wasmoon, json.lua (오프라인 동작용)
 ├── LICENSE                       # GPL-3.0
 └── NOTICE.md                     # 출처 · 제3자 라이선스
@@ -55,7 +59,12 @@ python3 -m http.server 8080
 
 ```bash
 cd risu-sim && node test.js
-# → 35 passed, 0 failed
+# → 89 passed, 0 failed
+
+# 브라우저 UI 통합 테스트 (파일 주입 + 클릭 65개 항목)
+python3 -m http.server 8901 &
+chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
+  --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
 ```
 
 ### 동적 에셋을 API 키 없이 테스트
@@ -74,11 +83,19 @@ http://localhost:8080/?asset=1&assetUrl=http://127.0.0.1:8899/v1&assetModel=mock
 
 ## 화면
 
+**파일 불러오기** — `.risup` / `.charx` / `.module` 을 끌어다 놓으면 프리셋·봇·모듈 칸이 채워집니다
+
+![불러오기](risu-sim/shot-import.png)
+
+**After 렌더** — 각 단계의 결과를 자산·카드 CSS 까지 적용해 채팅처럼
+
+![After 렌더](risu-sim/shot-after.png)
+
 **트레이스** — 단계별 before/after 와 트리거 발화 로그
 
 ![트레이스](risu-sim/shot-trigger.png)
 
-**렌더 프리뷰** — 실제 `.chattext` 스코프가 적용된 결과
+**채팅 프리뷰** — 봇 퍼스트메시지를 말풍선으로, 실제 `.chattext` 스코프가 적용된 결과
 
 ![프리뷰](risu-sim/shot-preview.png)
 
@@ -98,6 +115,9 @@ http://localhost:8080/?asset=1&assetUrl=http://127.0.0.1:8899/v1&assetModel=mock
 | Lua `listenEdit` 4종 | ✅ 1:1 | wasmoon, 동일 엔진 |
 | 트리거 VM + 35 effect | ✅ 1:1 | allowlist · 재귀 · indent |
 | 동적 에셋 | ✅ 1:1 | OpenAI 호환 `/embeddings` |
+| 파일 불러오기 (.risup/.charx/.module/.risum/.png) | ✅ 1:1 | `importer.js` |
+| After 렌더 (자산·카드 CSS) | ✅ 추가 기능 | `renderDisplay()` |
+| 플러그인 (CJS) | ⬜ 미탑재 | 설계만 |
 | 플러그인 | ⬜ 미탑재 | 훅 6개 구현 예정 |
 | 실제 LLM 호출 | ❌ 범위 밖 | |
 

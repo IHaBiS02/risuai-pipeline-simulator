@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SHOT</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #0b0e14; }
+  iframe { width: 100vw; height: 100vh; border: 0; display: block; }
+</style>
+</head>
+<body>
+<iframe id="f" src="../index.html"></iframe>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var tab = q.get('tab') || 'trace';
+  var f = document.getElementById('f');
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  f.addEventListener('load', function () {
+    var w = f.contentWindow, d = f.contentDocument;
+
+    function feed(kind, bytes, name) {
+      var dt = new w.DataTransfer();
+      dt.items.add(new w.File([bytes], name));
+      var inp = d.getElementById('file-' + kind);
+      inp.files = dt.files;
+      inp.dispatchEvent(new w.Event('change', { bubbles: true }));
+      return settle();
+    }
+    async function settle() {
+      for (var i = 0; i < 300; i++) {
+        if (!/읽는 중/.test(d.getElementById('importMsg').textContent)) break;
+        await sleep(40);
+      }
+      await sleep(200);
+    }
+    async function get(n) {
+      return new Uint8Array(await (await fetch('fixtures/' + n)).arrayBuffer());
+    }
+
+    (async function () {
+      await sleep(400);
+      await feed('preset', await get('fixture-preset.risup'), 'fixture-preset.risup');
+      await feed('character', await get('fixture-bot.charx'), 'fixture-bot.charx');
+      await feed('module', await get('fixture-module.module'), 'fixture-module.module');
+
+      d.getElementById('input').value =
+        '*{{char}} 가 고개를 든다.*\n\n' +
+        '<span class="hello">안녕, {{user}}.</span>\n\n' +
+        'HP: {{getvar::hp}}\n\n' +
+        '{{asset::smile_happy.png}} {{asset::angryy.png}}';
+      d.getElementById('runBtn').click();
+      await sleep(2500);
+
+      if (tab !== 'trace') {
+        var btn = d.querySelector('.tabs button[data-pane="' + tab + '"]');
+        if (btn) btn.click();
+        await sleep(300);
+      }
+      var sc = parseInt(q.get('scroll') || '0', 10);
+      if (sc) {
+        var right = d.querySelector('.col.right');
+        if (right) right.scrollTop = sc;
+        var left = d.querySelector('.col.left');
+        if (left) left.scrollTop = sc;
+        await sleep(200);
+      }
+      document.title = 'SHOT-READY';
+    })();
+  });
+})();
+</script>
+</body>
+</html>

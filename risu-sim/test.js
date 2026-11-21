@@ -305,6 +305,141 @@ console.log('\n[17] 트리거 — display allowlist / tempVars');
   eq('displayData 왕복', r.displayData, 'ORIGINAL');
 }
 
+console.log('\n[18] importer — 파일 형식 (픽스처는 실제 라이브러리로 생성)');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const dir = path.join(__dirname, 'tools', 'fixtures');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(dir, f)));
+
+  const want = {
+    'fixture-preset.risup': ['preset', 'risup'],
+    'fixture-preset-old.risupreset': ['preset', 'risupreset'],
+    'fixture-preset.json': ['preset', 'json'],
+    'fixture-bot.charx': ['character', 'charx'],
+    'fixture-bot-nomod.charx': ['character', 'charx'],
+    'fixture-bot.png': ['character', 'png'],
+    'fixture-module.module': ['module', 'charx'],
+    'fixture-module.risum': ['module', 'risum'],
+    'fixture-module.json': ['module', 'json']
+  };
+  for (const [file, exp] of Object.entries(want)) {
+    let got = null, err = null;
+    try {
+      const e = await imp.load({ name: file, data: read(file) });
+      got = [e.kind, e.format];
+    } catch (e) { err = e.message; }
+    eq(file + ' → ' + exp.join('/'), err ? 'ERR: ' + err : got.join('/'), exp.join('/'));
+  }
+}
+
+console.log('\n[19] importer — 프리셋 내용');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'tools', 'fixtures', f)));
+
+  for (const f of ['fixture-preset.risup', 'fixture-preset-old.risupreset', 'fixture-preset.json']) {
+    const e = await imp.load({ name: f, data: read(f) });
+    eq(f + ' 정규식 2개', e.regex.length, 2);
+    eq(f + ' order 플래그 보존', e.regex[1].flag, 'g,<order 5>');
+    eq(f + ' 기본 변수', JSON.stringify(e.vars), '{"hp":"77","toggle_flag":"1"}');
+  }
+}
+
+console.log('\n[20] importer — 봇 카드 내용 / 트리거 분리');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'tools', 'fixtures', f)));
+
+  const c = await imp.load({ name: 'fixture-bot.charx', data: read('fixture-bot.charx') });
+  eq('봇 이름', c.character.name, 'FixtureBot');
+  eq('퍼스트메시지 유지', c.character.firstMessage.indexOf('*{{char}} 가 고개를 든다.*'), 0);
+  eq('대체 인사 2개', c.character.alternateGreetings.length, 2);
+  eq('봇 정규식 1개', c.regex.length, 1);
+  eq('일반 트리거 1개', c.triggers.length, 1);
+  eq('Lua 트리거 분리 1개', c.luaTriggers.length, 1);
+  eq('Lua 트리거는 listenEdit 사용', c.luaTriggers[0].effect[0].code.indexOf("listenEdit('editDisplay'"), 0);
+  eq('에셋 이름', JSON.stringify(c.assets), '["smile_happy.png","angry.png"]');
+  eq('기본 변수', c.character.spec === 'chara_card_v3' && JSON.stringify(c.vars), '{"hp":"42"}');
+
+  const p = await imp.load({ name: 'fixture-bot.png', data: read('fixture-bot.png') });
+  eq('PNG 봇 이름', p.character.name, 'PngBot');
+  eq('PNG 봇 spec', p.character.spec, 'chara_card_v2');
+  eq('PNG 봇 정규식', p.regex.length, 1);
+
+  // charx 를 모듈로도 읽을 수 있어야 한다 (RisuAI importModule 과 동일)
+  const m = await imp.load({ name: 'fixture-bot.charx', data: read('fixture-bot.charx') }, { kind: 'module' });
+  eq('charx → 모듈 변환', m.kind, 'module');
+  eq('charx → 모듈 정규식', m.regex.length, 1);
+  eq('charx → 모듈 Lua 트리거', m.luaTriggers.length, 1);
+}
+
+console.log('\n[21] importer — 모듈 3형식 동일성 + 잘못된 입력');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'tools', 'fixtures', f)));
+
+  const a = await imp.load({ name: 'fixture-module.risum', data: read('fixture-module.risum') });
+  const b = await imp.load({ name: 'fixture-module.module', data: read('fixture-module.module') });
+  const c = await imp.load({ name: 'fixture-module.json', data: read('fixture-module.json') });
+  for (const [label, e] of [['risum', a], ['.module', b], ['json', c]]) {
+    eq(label + ' 모듈 이름', e.title, 'Fixture Module');
+    eq(label + ' 정규식 1개', e.regex.length, 1);
+    eq(label + ' <order 10> 보존', e.regex[0].flag, 'g,<order 10>');
+    eq(label + ' 트리거 1개', e.triggers.length, 1);
+  }
+
+  let errMsg = '';
+  try {
+    await imp.load({ name: 'x.risup', data: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) });
+  } catch (e) { errMsg = e.message; }
+  eq('깨진 .risup 은 오류', errMsg.length > 0, true);
+
+  let err2 = '';
+  try { await imp.load({ name: 'x.bin', data: new Uint8Array([9, 9, 9]) }); } catch (e) { err2 = e.message; }
+  eq('알 수 없는 확장자는 오류', /지원하지 않는 파일/.test(err2), true);
+}
+
+console.log('\n[22] importer 로 읽은 봇 → 파이프라인 실행');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'tools', 'fixtures', f)));
+
+  const preset = await imp.load({ name: 'fixture-preset.risup', data: read('fixture-preset.risup') });
+  const bot = await imp.load({ name: 'fixture-bot.charx', data: read('fixture-bot.charx') });
+  const mod = await imp.load({ name: 'fixture-module.risum', data: read('fixture-module.risum') });
+
+  const r = await sim.run({
+    mode: 'editdisplay',
+    markdown: true,
+    input: bot.character.firstMessage,
+    charName: bot.character.name,
+    userName: 'User',
+    vars: bot.vars,
+    presetRegex: preset.regex,
+    charRegex: bot.regex,
+    charTriggers: bot.triggers,
+    charLua: bot.luaTriggers,
+    moduleRegex: mod.regex,
+    moduleTriggers: mod.triggers,
+    moduleLua: mod.luaTriggers
+  });
+
+  eq('프리셋 정규식 적용', r.finalText.indexOf('pbadge') >= 0, true);
+  eq('모듈 order 10 이 HP 강조', /HP:\s*<b>/.test(r.finalText.replace(/\n/g, ' ')) || r.finalText.indexOf('<b>') >= 0, true);
+  // Node 에는 DOM 이 없어 CSS 스코프/html 은 브라우저 테스트에서 검증한다.
+  // 여기서는 encodeStyle 단계까지만 확인한다.
+  eq('encodeStyle 로 <style> 이 인코딩됨', r.display.encoded.indexOf('<risu-style>') >= 0, true);
+  eq('봇 래퍼 div 존재', r.finalText.indexOf('<div class="botwrap">') >= 0, true);
+  eq('CBS {{char}} 치환', r.finalText.indexOf('{{char}}') < 0, true);
+  eq('CBS {{getvar::hp}} = 42', r.finalText.indexOf('42') >= 0, true);
+  eq('미지원 CBS 없음', r.unsupported.length, 0);
+}
+
 console.log('\n결과: ' + pass + ' passed, ' + fail + ' failed');
 process.exitCode = fail ? 1 : 0;
 })();

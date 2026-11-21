@@ -29,3 +29,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+## 테스트 임시 산출물
+.fixtures-tmp/
+.uitest-dom.html

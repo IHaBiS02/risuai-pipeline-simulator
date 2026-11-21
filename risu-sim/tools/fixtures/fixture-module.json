@@ -1,0 +1,43 @@
+{
+  "type": "risuModule",
+  "name": "Fixture Module",
+  "description": "픽스처 모듈",
+  "id": "00000000-0000-4000-8000-000000000001",
+  "regex": [
+    {
+      "comment": "모듈: HP 강조",
+      "type": "editdisplay",
+      "in": "HP: (\\d+)",
+      "out": "HP: <b>$1</b>",
+      "ableFlag": true,
+      "flag": "g,<order 10>"
+    }
+  ],
+  "trigger": [
+    {
+      "comment": "모듈 트리거",
+      "type": "display",
+      "conditions": [],
+      "effect": [
+        {
+          "type": "v2ConsoleLog",
+          "source": "mod",
+          "sourceType": "value",
+          "indent": 0
+        }
+      ]
+    }
+  ],
+  "lorebook": [
+    {
+      "key": "연구소",
+      "secondkey": "",
+      "insertorder": 1,
+      "comment": "모듈 로어",
+      "content": "모듈 로어 내용",
+      "mode": "constant",
+      "alwaysActive": true,
+      "selective": false
+    }
+  ]
+}

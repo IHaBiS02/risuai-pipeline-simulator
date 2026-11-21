@@ -25,6 +25,7 @@
 - `src/ts/process/scriptings.ts` — `luaCodeWrapper`, `runLuaEditTrigger`, `runScripted` → [`risu-sim/lua-runtime.js`](risu-sim/lua-runtime.js)
 - `src/ts/process/triggers.ts` — `runTrigger`, 조건 평가, indent 인터프리터, allowlist → [`risu-sim/trigger-runtime.js`](risu-sim/trigger-runtime.js)
 - `src/ts/process/memory/hypamemory.ts` — 임베딩 요청 형식(`custom` 경로) → [`risu-sim/asset-runtime.js`](risu-sim/asset-runtime.js)
+- `src/ts/storage/database.svelte.ts` (`importPreset`, `downloadPreset`), `src/ts/process/modules.ts` (`readModule`), `src/ts/process/processzip.ts` (`CharXImporter`), `src/ts/characterCards.ts` (`importCharacterProcess`, `importCharacterCardSpec`), `src/ts/interchangeability.ts` (`convertCharacterToModule`), `src/ts/util.ts` (`encryptBuffer`/`decryptBuffer`) — 파일 포맷 해석 → [`risu-sim/importer.js`](risu-sim/importer.js)
 
 비교 대상으로 `PocketRisu/PocketRisu` (포크, GPL-3.0) 도 참고했습니다.
 
@@ -36,6 +37,10 @@
 |---|---|---|---|---|
 | wasmoon (Lua 5.4 WASM) | 1.16.0 | MIT | © ceifa — https://github.com/ceifa/wasmoon | `risu-sim/vendor/wasmoon/` |
 | json.lua | — | MIT | © 2020 rxi — https://github.com/rxi/json.lua | `risu-sim/vendor/lua/json.lua` |
+| rpack 치환 테이블 | — | MIT | RisuAI `src/ts/rpack/rpack_map.bin` (원본 rpack, © 그 저자) | [`risu-sim/importer.js`](risu-sim/importer.js) `RPACK_MAP_B64` |
+
+`rpack_map.bin` 은 256바이트 치환표 2개(encode/decode)로 이루어진 512바이트 파일이며,
+`importer.js` 안에 base64 문자열로 그대로 담겨 있습니다.
 
 `glue.wasm` 은 Emscripten 으로 빌드된 Lua 5.4 인터프리터이며, wasmoon 패키지에 포함된 그대로입니다.
 `glue.dataurl.js` 는 `file://` 에서도 동작하도록 `glue.wasm` 을 base64 data URL 로 감싼 파일입니다(내용 동일).

@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>UI-TEST</title>
+<style>
+  body { font: 12px/1.5 ui-monospace, monospace; background: #0b0e14; color: #d6deeb; margin: 0; }
+  iframe { width: 1400px; height: 900px; border: 1px solid #333; }
+  #out { white-space: pre-wrap; padding: 10px; }
+</style>
+</head>
+<body>
+<iframe id="frame" src="../index.html"></iframe>
+<pre id="out">RUNNING</pre>
+<script>
+(function () {
+  'use strict';
+  var lines = [];
+  var fails = 0;
+
+  function log(s) { lines.push(s); }
+  function ok(name, cond, extra) {
+    if (!cond) fails++;
+    log((cond ? 'PASS ' : 'FAIL ') + name + (extra != null && !cond ? '  → ' + extra : ''));
+  }
+  function eq(name, a, b) {
+    ok(name, a === b, 'expected ' + JSON.stringify(b) + ', got ' + JSON.stringify(a));
+  }
+  function flush() {
+    var el = document.getElementById('out');
+    el.textContent = (fails === 0 ? 'ALL PASS' : fails + ' FAILED') + ' (' + lines.length + ' checks)\n\n' + lines.join('\n');
+    document.title = fails === 0 ? 'ALLPASS' : 'FAILED-' + fails;
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  async function until(fn, ms) {
+    var t0 = Date.now();
+    while (Date.now() - t0 < (ms || 6000)) {
+      var v = fn();
+      if (v) return v;
+      await sleep(40);
+    }
+    return null;
+  }
+
+  var frame = document.getElementById('frame');
+  var errors = [];
+
+  frame.addEventListener('load', function () {
+    var w = frame.contentWindow;
+    var d = frame.contentDocument;
+    w.addEventListener('error', function (e) { errors.push('error: ' + (e.message || e)); });
+    w.addEventListener('unhandledrejection', function (e) { errors.push('rejection: ' + (e.reason && e.reason.message || e.reason)); });
+    var origErr = w.console.error;
+    w.console.error = function () {
+      errors.push('console.error: ' + Array.prototype.map.call(arguments, function (a) {
+        return (a && a.message) || String(a);
+      }).join(' '));
+      return origErr.apply(w.console, arguments);
+    };
+
+    main(w, d).then(function () {
+      ok('JS 오류 없음', errors.length === 0, errors.join(' | '));
+      // 엔진 상태
+      var stat = d.getElementById('stat').textContent;
+      ok('Lua WASM 준비됨', /Lua WASM ready/.test(stat), stat);
+      ok('정규식 스크립트 실행됨', /실행된 스크립트 \d+/.test(stat), stat);
+      flush();
+    }).catch(function (e) {
+      fails++;
+      log('EXCEPTION ' + ((e && e.stack) || e));
+      flush();
+    });
+  });
+
+  function fileNameFrom(kind) { return kind; }
+
+  async function feed(w, d, kind, fixtures, names) {
+    var input = d.getElementById('file-' + kind);
+    var dt = new w.DataTransfer();
+    for (var i = 0; i < fixtures.length; i++) {
+      dt.items.add(new w.File([fixtures[i].bytes], names ? names[i] : fixtures[i].name));
+    }
+    input.files = dt.files;
+    input.dispatchEvent(new w.Event('change', { bubbles: true }));
+    // importMsg 가 '읽는 중' 이 아닐 때까지 대기
+    await until(function () {
+      return !/읽는 중/.test(d.getElementById('importMsg').textContent);
+    }, 10000);
+    await sleep(250);
+    log('   [importMsg ' + kind + '] ' + d.getElementById('importMsg').textContent.replace(/\n/g, ' ⏎ '));
+  }
+
+  async function fetchFixtures(names) {
+    var out = [];
+    for (var i = 0; i < names.length; i++) {
+      var r = await fetch('fixtures/' + names[i]);
+      out.push({ name: names[i], bytes: new Uint8Array(await r.arrayBuffer()) });
+    }
+    return out;
+  }
+
+  async function main(w, d) {
+    await until(function () { return /실행된 스크립트/.test(d.getElementById('stat').textContent); }, 8000);
+
+    var F = await fetchFixtures([
+      'fixture-preset.risup',
+      'fixture-preset-old.risupreset',
+      'fixture-bot.charx',
+      'fixture-bot.png',
+      'fixture-module.module',
+      'fixture-module.risum',
+      'fixture-bot-nomod.charx'
+    ]);
+    var byName = {};
+    F.forEach(function (f) { byName[f.name] = f; });
+
+    function json(id) { return JSON.parse(d.getElementById(id).value || '[]'); }
+    function items(kind) { return d.querySelectorAll('#list-' + kind + ' .ib-item').length; }
+
+    // ---------- 프리셋 ----------
+    eq('처음엔 프리셋 목록이 비어 있음', items('preset'), 0);
+    await feed(w, d, 'preset', [byName['fixture-preset.risup']]);
+    eq('프리셋 1개 등록', items('preset'), 1);
+    eq('프리셋 정규식 2개 적용', json('presetRegex').length, 2);
+    eq('프리셋 정규식 comment 유지', json('presetRegex')[0].comment, '프리셋: 앞에 배지');
+    eq('프리셋 첫 항목이 적용 중', d.querySelectorAll('#list-preset .ib-item.applied').length, 1);
+
+    await feed(w, d, 'preset', [byName['fixture-preset-old.risupreset']]);
+    eq('프리셋 2개 등록', items('preset'), 2);
+    eq('한 번에 하나만 선택(라디오)', d.querySelectorAll('#list-preset input[type="radio"]').length, 2);
+    eq('라디오 체크는 1개', d.querySelectorAll('#list-preset input[type="radio"]:checked').length, 1);
+
+    // ---------- 봇 카드 ----------
+    eq('처음엔 봇 목록이 비어 있음', items('character'), 0);
+    await feed(w, d, 'character', [byName['fixture-bot.charx']]);
+    eq('봇 1개 등록', items('character'), 1);
+    eq('봇 이름 반영', d.getElementById('charName').value, 'FixtureBot');
+    ok(
+      '채팅 내용 = 퍼스트메시지',
+      d.getElementById('input').value.indexOf('*{{char}} 가 고개를 든다.*') === 0,
+      d.getElementById('input').value.slice(0, 60)
+    );
+    eq('봇 정규식 1개', json('charRegex').length, 1);
+    eq('봇 트리거 1개', json('charTriggers').length, 1);
+    eq('봇 Lua 트리거 1개', json('charLua').length, 1);
+    eq('봇 에셋 이름 2개', d.getElementById('assetNames').value.split('\n').length, 2);
+    eq('봇 기본 변수 hp', JSON.parse(d.getElementById('vars').value).hp, '42');
+
+    await feed(w, d, 'character', [byName['fixture-bot.png']]);
+    eq('봇 2개 등록', items('character'), 2);
+    eq('봇도 라디오 1개만', d.querySelectorAll('#list-character input[type="radio"]:checked').length, 1);
+    eq('PNG 봇으로 교체', d.getElementById('charName').value, 'PngBot');
+    eq('PNG 봇 정규식 1개', json('charRegex').length, 1);
+    eq('PNG 봇 트리거 0개', json('charTriggers').length, 0);
+
+    // 첫 항목 다시 선택
+    d.querySelector('#list-character .ib-item').click();
+    await sleep(300);
+    eq('목록 클릭으로 이전 봇 재선택', d.getElementById('charName').value, 'FixtureBot');
+
+    // ---------- 모듈 ----------
+    eq('처음엔 모듈 목록이 비어 있음', items('module'), 0);
+    await feed(w, d, 'module', [byName['fixture-module.module'], byName['fixture-module.risum']]);
+    eq('모듈 2개 등록', items('module'), 2);
+    eq('모듈은 체크박스', d.querySelectorAll('#list-module input[type="checkbox"]').length, 2);
+    eq('모듈 2개 모두 체크', d.querySelectorAll('#list-module input[type="checkbox"]:checked').length, 2);
+    eq('모듈 정규식 합쳐짐', json('moduleRegex').length, 2);
+    eq('모듈 트리거 합쳐짐', json('moduleTriggers').length, 2);
+    eq('모듈 order 플래그 보존', json('moduleRegex')[0].flag.indexOf('<order 10>') >= 0, true);
+
+    // 하나 해제
+    d.querySelector('#list-module .ib-item').click();
+    await sleep(300);
+    eq('모듈 1개만 체크', d.querySelectorAll('#list-module input[type="checkbox"]:checked').length, 1);
+    eq('모듈 정규식 1개로', json('moduleRegex').length, 1);
+
+    // 다시 체크
+    d.querySelector('#list-module .ib-item').click();
+    await sleep(300);
+    eq('다시 체크', json('moduleRegex').length, 2);
+
+    // ---------- 실행 결과 ----------
+    d.getElementById('runBtn').click();
+    await sleep(1200);
+
+    var stat = d.getElementById('stat').textContent;
+    ok('최종 길이 계산됨', /최종 길이 \d+/.test(stat), stat);
+    ok('미지원 CBS 없음', !/미지원 CBS/.test(stat), stat);
+
+    var html = d.getElementById('htmlOut').textContent;
+    ok('봇 CSS 가 .chattext 하위로 스코프됨', html.indexOf('x-risu-') >= 0, html.slice(0, 200));
+    ok('프리셋 정규식 결과 포함', html.indexOf('x-risu-pbadge') >= 0, html.slice(0, 300));
+    ok('모듈 정규식 결과(HP 강조) 포함', /HP:/.test(html), html.slice(0, 300));
+
+    var preview = d.getElementById('preview');
+    ok('프리뷰가 비어 있지 않음', preview.textContent.trim().length > 0, preview.textContent.slice(0, 80));
+    ok('채팅 버블이 봇 발화', d.getElementById('chatRow').className.indexOf('user') < 0);
+    eq('버블 이름 = 봇 이름', d.getElementById('chatName').textContent, 'FixtureBot');
+    eq('아바타 첫 글자', d.getElementById('chatAvatar').textContent, 'F');
+
+    // ---------- After 렌더 ----------
+    eq('After 렌더 토글 기본 켜짐', d.getElementById('traceRender').checked, true);
+    var rendered = d.querySelectorAll('#pane-trace .rendered');
+    ok('After 렌더 블록이 생성됨', rendered.length > 0, 'count=' + rendered.length);
+    ok('소스 보기 토글 존재', d.querySelectorAll('#pane-trace details.srcbox').length > 0,
+      String(d.querySelectorAll('#pane-trace details.srcbox').length));
+
+    var allHtml = Array.prototype.map.call(rendered, function (el) { return el.innerHTML; }).join('\n');
+    ok('카드 CSS 가 블록 스코프(.simscope-N)로 들어감', /\.simscope-\d+ \.x-risu-/.test(allHtml),
+      allHtml.slice(0, 260));
+
+    // 에셋 태그가 붙은 메시지로 렌더 확인 (정확 일치 + 퍼지 매칭)
+    d.getElementById('input').value = '*웃는다*\n\n{{asset::smile_happy.png}} 그리고 {{asset::angryy.png}}';
+    d.getElementById('runBtn').click();
+    await sleep(1500);
+    var all2 = Array.prototype.map.call(d.querySelectorAll('#pane-trace .rendered'), function (el) {
+      return el.innerHTML;
+    }).join('\n');
+    ok('에셋 자리표시자 렌더', /class="x-risu-sim-asset"/.test(all2), all2.slice(0, 400));
+    ok('에셋 이름 표시', /smile_happy\.png/.test(all2), all2.slice(0, 400));
+    ok('에셋 퍼지 매칭(angryy→angry.png)', /angry\.png/.test(all2), all2.slice(0, 500));
+
+    // 토글 끄기
+    var tog = d.getElementById('traceRender');
+    tog.checked = false;
+    tog.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(1500);
+    eq('토글 끄면 렌더 블록 없음', d.querySelectorAll('#pane-trace .rendered').length, 0);
+    ok('토글 꺼도 after 소스는 남음', /diff-after/.test(d.getElementById('pane-trace').innerHTML));
+
+    tog.checked = true;
+    tog.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(1500);
+    ok('다시 켜면 복구', d.querySelectorAll('#pane-trace .rendered').length > 0);
+
+    // ---------- textarea 직접 수정 → 적용 표시 해제 ----------
+    var ta = d.getElementById('charRegex');
+    ta.value = '[]';
+    ta.dispatchEvent(new w.Event('input', { bubbles: true }));
+    await sleep(400);
+    eq('수동 수정 시 적용 표시 해제', d.querySelectorAll('#list-character .ib-item.applied').length, 0);
+
+    // ---------- 잘못된 파일 ----------
+    var bad = await fetchFixtures(['fixture-module.risum']);
+    var input = d.getElementById('file-preset');
+    var dt = new w.DataTransfer();
+    dt.items.add(new w.File([bad[0].bytes], 'fixture-module.risum'));
+    input.files = dt.files;
+    input.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await until(function () {
+      return !/읽는 중/.test(d.getElementById('importMsg').textContent);
+    }, 10000);
+    await sleep(150);
+    ok('프리셋 칸에 모듈을 넣으면 거부', /실패|프리셋이 아닙니다/.test(d.getElementById('importMsg').textContent),
+      d.getElementById('importMsg').textContent);
+    eq('거부되어도 목록은 그대로', items('preset'), 2);
+
+    // ---------- 제거 ----------
+    d.querySelector('#list-module .ib-item .x').click();
+    await sleep(300);
+    eq('모듈 제거', items('module'), 1);
+    eq('남은 모듈 정규식 1개', json('moduleRegex').length, 1);
+  }
+})();
+</script>
+</body>
+</html>

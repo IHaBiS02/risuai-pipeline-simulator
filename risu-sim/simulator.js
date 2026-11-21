@@ -921,33 +921,34 @@
     return best;
   }
 
+  // 원본은 실제 이미지를 <img src="blob:..."> 로 넣는다. 시뮬레이터는 이미지 바이트를
+  // 갖고 있지 않으므로 "여기에 어떤 에셋이 들어갔는지" 보이는 자리표시자로 바꾼다.
+  // raw/path/source 는 CSS url() 등에 그대로 쓰여야 해서 문자열을 유지한다.
   function assetPlaceholder(type, name) {
     var n = escapeHtml(name);
     switch (type) {
       case 'raw':
       case 'path':
         return 'asset://' + n;
-      case 'img':
-        return '<img alt="[' + n + ']" class="sim-asset">';
-      case 'image':
-        return '<div class="sim-asset">[image: ' + n + ']</div>';
-      case 'video':
-      case 'video-img':
-        return '<div class="sim-asset">[video: ' + n + ']</div>';
-      case 'audio':
-      case 'bgm':
-        return '<div class="sim-asset">[audio: ' + n + ']</div>';
-      case 'asset':
-        return '<div class="sim-asset">[asset: ' + n + ']</div>';
-      case 'bg':
-        // 원본은 mode === 'back' 에서만 배경 div 를 만든다
-        return '<div class="sim-bg">[bg: ' + n + ']</div>';
-      case 'emotion':
-        return '<div class="sim-asset">[emotion: ' + n + ']</div>';
       case 'source':
         return 'profile://' + n;
+      case 'bg':
+        // 원본은 mode === 'back' 에서만 배경 div 를 만든다
+        return '<div class="x-risu-sim-bg" data-t="BG">' + n + '</div>';
+      case 'img':
+        return '<span class="x-risu-sim-asset" data-t="IMG">' + n + '</span>';
+      case 'video':
+      case 'video-img':
+        return '<span class="x-risu-sim-asset" data-t="VIDEO">' + n + '</span>';
+      case 'audio':
+      case 'bgm':
+        return '<span class="x-risu-sim-asset" data-t="AUDIO">' + n + '</span>';
+      case 'emotion':
+        return '<span class="x-risu-sim-asset" data-t="EMOTION">' + n + '</span>';
+      case 'image':
+      case 'asset':
       default:
-        return '';
+        return '<span class="x-risu-sim-asset" data-t="' + escapeHtml(String(type).toUpperCase()) + '">' + n + '</span>';
     }
   }
 
@@ -1193,16 +1194,21 @@
   }
 
   // parser.svelte.ts:964-997
-  function decodeStyleRule(node) {
+  // scope: 기본 '.chattext'. 트레이스의 After 미리보기에서는 블록마다 다른 스코프를 쓴다
+  //        (여러 블록의 카드 CSS 가 서로 섞이지 않게).
+  function decodeStyleRule(node, scope) {
+    var prefix = scope || '.chattext';
     if (node.type === 'rule') {
       var list = splitSelectors(node.selector);
       list = list.map(function (s) {
-        return '.chattext ' + renameClasses(s);
+        return prefix + ' ' + renameClasses(s);
       });
       node.selector = list.join(',');
     }
     if (node.type === 'atrule' && AT_RULE_NESTED.indexOf(node.name) >= 0 && node.body) {
-      node.children = parseCss(node.body).map(decodeStyleRule);
+      node.children = parseCss(node.body).map(function (n) {
+        return decodeStyleRule(n, prefix);
+      });
     }
     if (node.type === 'atrule' && node.name === 'import' && node.prelude.indexOf('data:') === 0) {
       node.prelude = 'data:,';
@@ -1239,12 +1245,14 @@
   }
 
   // parser.svelte.ts:1005-1029
-  function decodeStyleContent(hexText, ctx) {
+  function decodeStyleContent(hexText, ctx, scope) {
     try {
       var text = hexDecode(hexText);
       text = cbsParse(text, ctx); // CSS 안에서도 CBS 1회 (원본과 동일)
       var ast = parseCss(text);
-      ast = ast.map(decodeStyleRule);
+      ast = ast.map(function (n) {
+        return decodeStyleRule(n, scope);
+      });
       return { css: stringifyCss(ast) };
     } catch (e) {
       return { css: undefined, fallback: ctx.returnCSSError ? 'CSS ERROR: ' + e.message : '' };
@@ -1420,7 +1428,7 @@
   }
 
   // parser.svelte.ts:809-856 trimMarkdown
-  function trimMarkdown(html, ctx) {
+  function trimMarkdown(html, ctx, scope) {
     if (!html) return '';
     if (html.indexOf('<risu-style') < 0) {
       return sanitizeHtml(html, ctx);
@@ -1433,7 +1441,7 @@
     var styles = Array.prototype.slice.call(root.querySelectorAll('risu-style'));
     for (var i = 0; i < styles.length; i++) {
       var el = styles[i];
-      var decoded = decodeStyleContent(el.textContent || '', ctx);
+      var decoded = decodeStyleContent(el.textContent || '', ctx, scope);
       if (decoded.css === undefined) {
         el.replaceWith(document.createTextNode(decoded.fallback || ''));
         continue;
@@ -1676,11 +1684,13 @@
 
     // --- 표시 단계 ---
     function renderForDisplay(text) {
-      // Node(테스트) 환경에는 DOM 이 없다 → 텍스트만 돌려준다
+      // encodeStyle 은 순수 문자열 변환이라 DOM 없이도 가능하다
+      var encodedNoDom = encodeStyle(text);
+      // Node(테스트) 환경에는 DOM 이 없다 → 스코프/markdown 없이 텍스트만 돌려준다
       if (typeof document === 'undefined') {
-        return { encoded: text, markdown: text, html: escapeHtml(text), css: '' };
+        return { encoded: encodedNoDom, markdown: text, html: escapeHtml(text), css: '' };
       }
-      var encoded = encodeStyle(text);
+      var encoded = encodedNoDom;
       var md = config.markdown === false ? text : renderMarkdown(encoded);
       var html = trimMarkdown(md, ctx);
       var tpl = document.createElement('template');
@@ -1725,8 +1735,82 @@
     };
   }
 
+  // ==================================================================
+  // 7. 표시 단계 단독 실행 (트레이스의 After 미리보기용)
+  // ==================================================================
+
+  function makeDisplayCtx(o) {
+    return {
+      vars: Object.assign({}, o.vars || {}),
+      globalVars: Object.assign({}, o.globalVars || {}),
+      charName: o.charName || 'Char',
+      userName: o.userName || 'User',
+      role: o.role || '',
+      prevMessage: o.prevMessage || '',
+      mainprompt: '',
+      jb: '',
+      globalnote: '',
+      returnCSSError: true,
+      unsupported: new Set(),
+      stopSending: false,
+      chat: [{ role: 'char', data: '' }]
+    };
+  }
+
+  /**
+   * 임의의 텍스트를 "표시 단계"에 통과시킨다.
+   *   자산 태그 해석(선택) → encodeStyle → markdown → DOMPurify(근사) → CSS 스코프
+   *
+   * @param {string} text
+   * @param {{markdown?:boolean, scope?:string, assets?:string[], maxDifference?:number, expandCbs?:boolean,
+   *          charName?:string, userName?:string, vars?:object, globalVars?:object,
+   *          prevMessage?:string, resolveAssets?:boolean}} [opts]
+   * @returns {{html:string, css:string, encoded:string, markdown:string}}
+   */
+  function renderDisplay(text, opts) {
+    opts = opts || {};
+    var src = String(text == null ? '' : text);
+    var ctx = opts.ctx || makeDisplayCtx(opts);
+
+    // 중간 단계의 after 에는 아직 {{char}} 같은 CBS 가 남아 있다.
+    // 미리보기용으로 강제 전개하고 싶을 때 expandCbs:true.
+    if (opts.expandCbs) {
+      try {
+        src = cbsParse(src, ctx);
+      } catch (e) {
+        /* CBS 오류는 무시하고 원문 유지 */
+      }
+    }
+
+    // 자산 태그: 이름 목록을 주면 {{asset::x}} 류를 자리표시자로 바꾼다
+    if (opts.resolveAssets !== false && opts.assets && opts.assets.length) {
+      src = resolveAssetTags(src, opts.assets, opts.maxDifference == null ? 4 : opts.maxDifference);
+    }
+
+    var encoded = encodeStyle(src);
+    var md = opts.markdown === false ? src : renderMarkdown(encoded);
+
+    if (typeof document === 'undefined') {
+      return { html: escapeHtml(src).replace(/\n/g, '<br>'), css: '', encoded: encoded, markdown: md };
+    }
+
+    var html = trimMarkdown(md, ctx, opts.scope);
+
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var css = Array.prototype.slice
+      .call(tpl.content.querySelectorAll('style'))
+      .map(function (s) {
+        return s.textContent;
+      })
+      .join('\n');
+
+    return { html: html, css: css, encoded: encoded, markdown: md };
+  }
+
   window.RisuSim = {
     run: run,
+    renderDisplay: renderDisplay,
     encodeStyle: encodeStyle,
     trimMarkdown: trimMarkdown,
     _internal: { cbsParse: cbsParse, resolveAssetTags: resolveAssetTags }

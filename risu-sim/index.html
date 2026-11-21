@@ -142,7 +142,21 @@
   }
   /* 카드 CSS 는 .chattext 하위로만 적용된다 (RisuAI 와 동일) */
   .chattext { color: var(--text); font-size: 14px; line-height: 1.7; }
-  .chattext .sim-asset, .chattext .sim-bg { color: var(--muted); font-style: italic; }
+
+  /* 에셋 자리표시자 (실제 이미지 대신 어떤 에셋이 들어갔는지 보여준다) */
+  .x-risu-sim-asset, .x-risu-sim-bg {
+    display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%;
+    padding: 1px 7px; border: 1px dashed #3d4a63; border-radius: 6px;
+    background: #0f1420; color: #9fb3d1; font-size: 11.5px; font-style: normal;
+    vertical-align: middle; word-break: break-all;
+  }
+  .x-risu-sim-bg { display: flex; margin: 6px 0; }
+  .x-risu-sim-asset::before, .x-risu-sim-bg::before {
+    content: attr(data-t); flex: none;
+    font: 600 8.5px/1.6 ui-monospace, monospace; letter-spacing: .08em;
+    color: #5cc8ff; border: 1px solid #2b3a55; border-radius: 3px; padding: 0 3px;
+  }
+  .x-risu-sim-bg::before { color: var(--warn); }
   .chattext p { margin: 0 0 10px; }
   .chattext h1, .chattext h2, .chattext h3 { margin: 12px 0 8px; }
   .chattext pre { max-height: none; }
@@ -151,6 +165,31 @@
     background: #1b2233; color: var(--text); border: 1px solid #2b3a55;
     border-radius: 6px; padding: 4px 10px; cursor: pointer;
   }
+
+  /* 트레이스 After 렌더 블록 */
+  .rendered {
+    border: 1px solid var(--line); border-radius: 8px; background: #0a0e15;
+    padding: 10px 12px; margin: 5px 0; overflow: auto;
+    font-size: 14px; line-height: 1.7; color: var(--text);
+  }
+  .rendered pre { max-height: 260px; }
+  .rendered-note { font-size: 11.5px; color: var(--warn); margin-top: 5px; }
+  details.srcbox { margin: 2px 0 0; }
+  details.srcbox > summary {
+    cursor: pointer; list-style: none;
+    font-size: 11px; color: var(--muted); letter-spacing: .04em;
+  }
+  details.srcbox > summary::-webkit-details-marker { display: none; }
+  details.srcbox > summary::before { content: "▸ "; }
+  details.srcbox[open] > summary::before { content: "▾ "; }
+  .pre-label .tag-render {
+    font-size: 9.5px; color: var(--accent); border: 1px solid #2b3a55;
+    border-radius: 3px; padding: 0 4px; margin-left: 5px; letter-spacing: .04em;
+  }
+  .tabopt {
+    margin-left: auto; padding: 6px 2px 6px 10px; font-size: 12px; color: var(--muted);
+  }
+  .tabopt2 { padding: 6px 2px; font-size: 12px; color: var(--muted); }
 
   .note {
     margin-top: 14px; padding: 11px 13px; border-radius: 8px;
@@ -175,6 +214,72 @@
     color: #fca5a5; font: 12px/1.5 ui-monospace, monospace;
   }
   .err-box.show { display: block; }
+
+  /* ---- 파일 불러오기 ---- */
+  .import-grid { display: grid; gap: 9px; }
+  .ib { border: 1px solid var(--line); border-radius: 9px; background: var(--panel); overflow: hidden; }
+  .ib.drag { border-color: var(--accent); background: #14202f; }
+  .ib-head {
+    display: flex; align-items: center; gap: 7px;
+    padding: 7px 9px; border-bottom: 1px solid var(--line);
+  }
+  .ib-head b { font-size: 12.5px; font-weight: 600; }
+  .ib-head .req { font-size: 11px; color: var(--muted); }
+  .ib-head button.mini { margin-left: auto; padding: 3px 9px; font-size: 11.5px; }
+  .ib-list { max-height: 148px; overflow: auto; padding: 4px; }
+  .ib-empty { padding: 11px 8px; color: var(--muted); font-size: 12px; text-align: center; }
+  .ib-item {
+    display: flex; align-items: flex-start; gap: 7px;
+    padding: 5px 6px; border-radius: 7px; cursor: pointer;
+  }
+  .ib-item:hover { background: rgba(255, 255, 255, .035); }
+  .ib-item input { margin: 3px 0 0; accent-color: #3a5277; flex: none; }
+  .ib-item .txt { min-width: 0; flex: 1; }
+  .ib-item .t {
+    display: block; font-size: 12.5px; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ib-item .s {
+    display: block; font-size: 11px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ib-item.applied { background: rgba(92, 200, 255, .08); }
+  .ib-item.applied .t::after {
+    content: " 적용 중"; font-size: 10px; color: var(--accent); font-weight: 600;
+  }
+  .ib-item .warn { color: var(--warn); font-size: 11px; flex: none; padding-top: 2px; }
+  .ib-item .x {
+    border: none; background: none; color: var(--muted); cursor: pointer;
+    font: 14px/1 ui-monospace, monospace; padding: 1px 2px; flex: none;
+  }
+  .ib-item .x:hover { color: var(--err); }
+  .ib-note { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+  .ib-msg {
+    display: none; margin-top: 8px; padding: 7px 10px; border-radius: 6px;
+    font: 11.5px/1.5 ui-monospace, monospace; white-space: pre-wrap;
+  }
+  .ib-msg.show { display: block; }
+  .ib-msg.ok { background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.3); color: #86efac; }
+  .ib-msg.bad { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3); color: #fca5a5; }
+
+  /* ---- 채팅 프리뷰 ---- */
+  .chatlog { display: flex; flex-direction: column; gap: 12px; }
+  .chatrow { display: flex; gap: 10px; align-items: flex-start; }
+  .chatrow.user { flex-direction: row-reverse; }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    background: #1d2635; border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; color: #9fd7ff;
+  }
+  .chatrow.user .avatar { color: #ffd5a3; }
+  .bubble {
+    min-width: 0; max-width: calc(100% - 46px);
+    background: #111823; border: 1px solid var(--line);
+    border-radius: 12px; padding: 9px 12px;
+  }
+  .bubble .bname { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
+  .empty-hint { color: var(--muted); font-size: 12.5px; padding: 10px; text-align: center; }
 </style>
 </head>
 <body>
@@ -190,6 +295,43 @@
 <main>
   <!-- ============================ 설정 ============================ -->
   <div class="col left">
+    <div class="field">
+      <label>파일 불러오기 <span class="hint">봇 퍼스트메시지가 입력 텍스트로 들어갑니다</span></label>
+      <div class="import-grid">
+        <div class="ib" data-kind="preset">
+          <div class="ib-head">
+            <b>프리셋</b><span class="req">1개 택 1</span>
+            <button type="button" class="mini" data-act="pick">파일 추가</button>
+          </div>
+          <div class="ib-list" id="list-preset"></div>
+        </div>
+        <div class="ib" data-kind="character">
+          <div class="ib-head">
+            <b>봇 카드</b><span class="req">1개 택 1</span>
+            <button type="button" class="mini" data-act="pick">파일 추가</button>
+          </div>
+          <div class="ib-list" id="list-character"></div>
+        </div>
+        <div class="ib" data-kind="module">
+          <div class="ib-head">
+            <b>모듈</b><span class="req">여러 개 선택</span>
+            <button type="button" class="mini" data-act="pick">파일 추가</button>
+          </div>
+          <div class="ib-list" id="list-module"></div>
+        </div>
+      </div>
+      <div class="ib-msg" id="importMsg"></div>
+      <div class="ib-note">
+        <b>.risup</b> · <b>.risupreset</b> 프리셋 / <b>.charx</b> · <b>.png</b> · <b>.json</b> 봇 카드 /
+        <b>.module</b> · <b>.risum</b> · <b>.charx</b> 모듈 &nbsp;— 박스에 파일을 끌어다 놔도 됩니다.<br>
+        불러오면 아래 정규식·트리거 칸이 <b>선택한 파일 내용으로 덮어써집니다.</b>
+        (이후 직접 수정하면 "적용 중" 표시가 사라집니다.) 새로고침하면 목록은 비워집니다.
+      </div>
+      <input type="file" id="file-preset" accept=".risup,.risupreset,.json" hidden>
+      <input type="file" id="file-character" accept=".charx,.png,.json" hidden>
+      <input type="file" id="file-module" accept=".charx,.module,.risum,.json" multiple hidden>
+    </div>
+
     <div class="row">
       <div class="field">
         <label>실행 모드 <span class="hint">ScriptMode</span></label>
@@ -322,10 +464,14 @@
         <li><b>1:1 이식</b>: 정규식 3레이어 순서, <code>&lt;order N&gt;</code> 내림차순 stable 정렬,
           <code>in/out/flag/ableFlag</code> 처리, <code>$n</code>·<code>$&amp;</code>·<code>$1</code>,
           <code>@@emo</code>/<code>@@inject</code>/<code>@@move_*</code>/<code>@@repeat_back</code>,
-          치환 결과 재-CBS, CBS → 정규식 순서, <code>encodeStyle</code>, CSS 스코프(<code>.chattext</code> + <code>x-risu-</code>)</li>
+          치환 결과 재-CBS, CBS → 정규식 순서, <code>encodeStyle</code>, CSS 스코프(<code>.chattext</code> + <code>x-risu-</code>),
+          Lua 훅 4종(wasmoon), 트리거 VM, 동적 에셋(임베딩)</li>
+        <li><b>1:1 이식 (파일)</b>: <code>.risup</code>(rpack→zlib→msgpack→AES-GCM),
+          <code>.charx</code>/<code>.module</code>(ZIP + <code>module.risum</code>), <code>.risum</code>, PNG <code>tEXt</code> 카드</li>
         <li><b>근사</b>: CBS 함수는 서브셋(미지원은 화면에 표시), 새니타이저는 DOMPurify 대체 구현,
-          CSS 파서는 <code>@adobe/css-tools</code> 대체, 마크다운은 markdown-it 근사</li>
-        <li><b>미탑재</b>: Lua(wasmoon), 트리거, 플러그인, 동적 에셋, 실제 LLM</li>
+          CSS 파서는 <code>@adobe/css-tools</code> 대체, 마크다운은 markdown-it 근사,
+          에셋은 이미지 바이트 대신 자리표시자</li>
+        <li><b>미탑재</b>: 플러그인(CJS), 실제 LLM 호출, 로어북 발동</li>
       </ul>
     </div>
   </div>
@@ -340,16 +486,35 @@
       <button data-pane="css">스코프된 CSS</button>
       <button data-pane="html">최종 HTML</button>
       <button data-pane="vars">변수</button>
+      <label class="chk tabopt" title="트레이스의 after 를 자산·카드 CSS 까지 적용해 렌더링합니다">
+        <input type="checkbox" id="traceRender" checked> After 렌더
+      </label>
+      <label class="chk tabopt2" title="중간 단계에 남은 {{char}} 같은 CBS 를 미리보기용으로 한 번 더 전개합니다">
+        <input type="checkbox" id="traceCbs" checked> CBS 전개
+      </label>
     </div>
 
     <div class="pane active" id="pane-trace"></div>
-    <div class="pane" id="pane-preview"><div id="previewWrap"><div class="chattext" id="preview"></div></div></div>
+    <div class="pane" id="pane-preview">
+      <div id="previewWrap">
+        <div class="chatlog">
+          <div class="chatrow" id="chatRow">
+            <div class="avatar" id="chatAvatar">R</div>
+            <div class="bubble">
+              <div class="bname" id="chatName">Risu</div>
+              <div class="chattext" id="preview"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="pane" id="pane-css"><pre id="cssOut"></pre></div>
     <div class="pane" id="pane-html"><pre id="htmlOut"></pre></div>
     <div class="pane" id="pane-vars"><pre id="varsOut"></pre></div>
   </div>
 </main>
 
+<script src="importer.js"></script>
 <script src="simulator.js"></script>
 <script src="lua-runtime.js"></script>
 <script src="asset-runtime.js"></script>
@@ -567,9 +732,48 @@
       })();
   }
 
+  // after 블록을 실제 채팅처럼 렌더한다 (자산 태그 → encodeStyle → markdown → 새니타이즈 → CSS 스코프).
+  // 블록마다 스코프를 따로 줘서 카드 CSS 가 다른 단계와 섞이지 않게 한다.
+  var afterSeq = 0;
+  function afterBlock(text, cfg, label) {
+    var raw = '<pre class="diff-after">' + esc(clip(text)) + '</pre>';
+    if (!$('traceRender').checked || text == null || text === '') return raw;
+    var str = String(text);
+    if (str.length > 40000) {
+      return '<div class="rendered-note">After 렌더 생략 — 너무 깁니다 (' + str.length + '자)</div>' + raw;
+    }
+    var scope = 'simscope-' + ++afterSeq;
+    var r;
+    try {
+      r = window.RisuSim.renderDisplay(str, {
+        markdown: cfg.markdown,
+        scope: '.' + scope,
+        // dynamicAssets(enabled) 는 임베딩 퍼지 매칭 기능이고,
+        // {{asset::}} 태그 해석은 카드에 에셋이 있으면 항상 일어난다 (parseAdditionalAssets).
+        expandCbs: $('traceCbs').checked,
+        assets: (cfg.assets && cfg.assets.assetNames) || [],
+        maxDifference: cfg.assets && cfg.assets.maxDifference,
+        charName: cfg.charName,
+        userName: cfg.userName,
+        vars: cfg.vars,
+        globalVars: cfg.globalVars,
+        prevMessage: cfg.prevMessage
+      });
+    } catch (e) {
+      return '<div class="rendered-note">After 렌더 오류: ' + esc(e.message) + '</div>' + raw;
+    }
+    return (
+      '<div class="pre-label">after<span class="tag-render">RENDER' +
+        ($('traceCbs').checked ? ' · CBS' : '') + '</span></div>' +
+      '<div class="rendered"><div class="' + scope + '">' + r.html + '</div></div>' +
+      '<details class="srcbox"><summary>소스 보기</summary>' + raw + '</details>'
+    );
+  }
+
   function renderTrace(result, cfg) {
     var host = $('pane-trace');
     var html = '';
+    afterSeq = 0; // 블록 스코프 번호 초기화
 
     result.trace.forEach(function (st) {
       var badge = st.skipped
@@ -743,13 +947,13 @@
 
           if (!e.skipped) {
             html += '<div class="pre-label">before</div><pre class="diff-before">' + esc(clip(e.before)) + '</pre>';
-            html += '<div class="pre-label">after</div><pre class="diff-after">' + esc(clip(e.after)) + '</pre>';
+            html += afterBlock(e.after, cfg);
           }
           html += '</div></details>';
         });
       } else if (!st.table) {
         html += '<div class="pre-label">before</div><pre class="diff-before">' + esc(clip(st.before)) + '</pre>';
-        html += '<div class="pre-label">after</div><pre class="diff-after">' + esc(clip(st.after)) + '</pre>';
+        html += afterBlock(st.after, cfg);
       }
 
       html += '</div></details>';
@@ -776,7 +980,19 @@
 
   function renderPreview(result) {
     var host = $('preview');
-    host.innerHTML = result.display.html;
+
+    // 채팅 말풍선: 입력 단계면 유저, 그 외에는 봇 발화로 보여준다
+    var isUser = $('mode').value === 'editinput';
+    var who = isUser ? ($('userName').value || 'User') : ($('charName').value || 'Char');
+    $('chatRow').className = 'chatrow' + (isUser ? ' user' : '');
+    $('chatAvatar').textContent = (who.trim().charAt(0) || '?').toUpperCase();
+    $('chatName').textContent = who + (isUser ? ' (입력 단계)' : '');
+
+    if (result.display.html) {
+      host.innerHTML = result.display.html;
+    } else {
+      host.innerHTML = '<div class="empty-hint">표시할 내용이 없습니다</div>';
+    }
 
     // 카드 CSS(<style>)는 전역이지만 셀렉터가 .chattext 하위로 스코프되어 있다.
     // 미리보기 밖으로 새지 않는지 눈으로 확인할 수 있게 그대로 삽입한다.
@@ -880,6 +1096,250 @@
     msg.textContent = '임베딩 캐시를 비웠습니다.';
   });
 
+  // ---- 파일 불러오기 ----
+  // 프리셋/봇은 라디오(1개), 모듈은 체크박스(여러 개).
+  // 모듈 순서는 import 순서 = RisuAI 의 db.modules 순서와 같다.
+  // (getModuleByIds 가 db.modules 를 filter 하므로 선택 순서가 아니라 DB 순서다)
+  var KIND_LABEL = { preset: '프리셋', character: '봇 카드', module: '모듈' };
+  var KIND_MULTI = { preset: false, character: false, module: true };
+
+  var store = { preset: [], character: [], module: [] };
+  var selected = { preset: null, character: null };
+  var moduleChecked = {};
+  var applied = { preset: null, character: null, modules: [] };
+  var importSeq = 0;
+
+  function findEntry(kind, id) {
+    for (var i = 0; i < store[kind].length; i++) {
+      if (store[kind][i].id === id) return store[kind][i];
+    }
+    return null;
+  }
+
+  function importMsg(text, bad) {
+    var el = $('importMsg');
+    if (!text) {
+      el.className = 'ib-msg';
+      el.textContent = '';
+      return;
+    }
+    el.className = 'ib-msg show ' + (bad ? 'bad' : 'ok');
+    el.textContent = text;
+  }
+
+  function renderImportLists() {
+    ['preset', 'character', 'module'].forEach(function (kind) {
+      var host = $('list-' + kind);
+      var items = store[kind];
+      if (!items.length) {
+        host.innerHTML = '<div class="ib-empty">불러온 ' + KIND_LABEL[kind] + ' 없음</div>';
+        return;
+      }
+      var html = '';
+      items.forEach(function (it) {
+        var on = KIND_MULTI[kind] ? !!moduleChecked[it.id] : selected[kind] === it.id;
+        var isApplied = KIND_MULTI[kind]
+          ? applied.modules.indexOf(it.id) >= 0
+          : applied[kind] === it.id;
+        html += '<label class="ib-item' + (isApplied ? ' applied' : '') + '" data-id="' + it.id + '">' +
+          '<input type="' + (KIND_MULTI[kind] ? 'checkbox' : 'radio') + '"' +
+          (KIND_MULTI[kind] ? '' : ' name="sel-' + kind + '"') +
+          (on ? ' checked' : '') + '>' +
+          '<span class="txt"><span class="t" title="' + esc(it.fileName) + '">' + esc(it.title) + '</span>' +
+          '<span class="s">' + esc(it.subtitle) + ' \u00b7 ' + esc(it.fileName) + '</span></span>' +
+          (it.warnings && it.warnings.length
+            ? '<span class="warn" title="' + esc(it.warnings.join('\n')) + '">!</span>'
+            : '') +
+          '<button type="button" class="x" title="목록에서 제거">&times;</button>' +
+          '</label>';
+      });
+      host.innerHTML = html;
+    });
+  }
+
+  function addEntries(kind, entries) {
+    entries.forEach(function (e) {
+      e.id = 'imp' + ++importSeq;
+      store[kind].push(e);
+      if (KIND_MULTI[kind]) moduleChecked[e.id] = true;
+      else selected[kind] = e.id;
+    });
+  }
+
+  async function addFiles(kind, files) {
+    if (!files || !files.length) return;
+    if (!window.RisuImport) {
+      importMsg('importer.js 가 로드되지 않았습니다', true);
+      return;
+    }
+    if (!KIND_MULTI[kind]) files = [files[0]]; // 한 번에 하나만 (여러 개를 골라도 첫 개)
+    importMsg(KIND_LABEL[kind] + ' ' + files.length + '개 읽는 중…', false);
+
+    var loaded = [];
+    var errs = [];
+    for (var i = 0; i < files.length; i++) {
+      try {
+        var entry = await window.RisuImport.load(files[i], {
+          kind: kind === 'module' ? 'module' : undefined
+        });
+        if (kind === 'preset' && entry.kind !== 'preset') {
+          throw new Error('프리셋이 아닙니다 (' + entry.kind + ')');
+        }
+        if (kind === 'character' && entry.kind !== 'character') {
+          throw new Error('봇 카드가 아닙니다 (' + entry.kind + ')');
+        }
+        if (kind === 'module' && entry.kind !== 'module') {
+          throw new Error('모듈이 아닙니다 (' + entry.kind + ')');
+        }
+        loaded.push(entry);
+      } catch (e) {
+        errs.push(files[i].name + ': ' + ((e && e.message) || e));
+      }
+    }
+
+    if (loaded.length) {
+      addEntries(kind, loaded);
+      applySelection(true);
+      var ok = loaded.map(function (e) { return KIND_LABEL[kind] + ' "' + e.title + '"'; }).join(', ');
+      importMsg(errs.length ? ok + '\n[실패]\n' + errs.join('\n') : ok + ' 불러옴' + (errs.length ? '' : ''),
+        errs.length > 0);
+    } else {
+      importMsg('[실패]\n' + errs.join('\n'), true);
+    }
+  }
+
+  function flat(arr, key) {
+    var out = [];
+    arr.forEach(function (e) {
+      (e[key] || []).forEach(function (s) { out.push(s); });
+    });
+    return out;
+  }
+
+  /** 선택 상태를 아래 textarea 들에 반영한다. 해당 레이어에 불러온 파일이 없으면 건드리지 않는다. */
+  function applySelection(shouldRun) {
+    // 프리셋
+    if (store.preset.length) {
+      var p = findEntry('preset', selected.preset);
+      setJson($('presetRegex'), $('presetRegexErr'), p ? p.regex : []);
+      applied.preset = p ? p.id : null;
+      if (p && p.vars && Object.keys(p.vars).length && !store.character.length) {
+        setJson($('vars'), $('varsErr'), p.vars);
+      }
+    }
+
+    // 봇 카드
+    if (store.character.length) {
+      var c = findEntry('character', selected.character);
+      setJson($('charRegex'), $('charRegexErr'), c ? c.regex : []);
+      setJson($('charTriggers'), $('charTriggersErr'), c ? c.triggers : []);
+      setJson($('charLua'), $('charLuaErr'), c ? c.luaTriggers : []);
+      if (c) {
+        if (c.character.name) $('charName').value = c.character.name;
+        // 채팅 내용 = 봇 퍼스트메시지
+        if (c.character.firstMessage) {
+          $('input').value = c.character.firstMessage;
+        } else {
+          $('input').value = '';
+        }
+        if (c.assets && c.assets.length) $('assetNames').value = c.assets.join('\n');
+        if (c.vars && Object.keys(c.vars).length) setJson($('vars'), $('varsErr'), c.vars);
+      }
+      applied.character = c ? c.id : null;
+    }
+
+    // 모듈 (체크된 것만, 목록 순서대로 이어붙임)
+    if (store.module.length) {
+      var mods = store.module.filter(function (m) { return !!moduleChecked[m.id]; });
+      setJson($('moduleRegex'), $('moduleRegexErr'), flat(mods, 'regex'));
+      setJson($('moduleTriggers'), $('moduleTriggersErr'), flat(mods, 'triggers'));
+      setJson($('moduleLua'), $('moduleLuaErr'), flat(mods, 'luaTriggers'));
+      applied.modules = mods.map(function (m) { return m.id; });
+    }
+
+    renderImportLists();
+    if (shouldRun !== false) run().catch(function (e) { console.error(e); });
+  }
+
+  // 목록 클릭 / 체크
+  ['preset', 'character', 'module'].forEach(function (kind) {
+    $('list-' + kind).addEventListener('click', function (ev) {
+      var row = ev.target.closest ? ev.target.closest('.ib-item') : null;
+      if (!row) return;
+      // label 기본 동작(라디오/체크박스 토글)을 막고 상태를 직접 관리한다.
+      // 안 막으면 label 클릭 + input 클릭이 둘 다 버블링되어 체크가 두 번 뒤집힌다.
+      ev.preventDefault();
+      var id = row.dataset.id;
+      if (ev.target.classList.contains('x')) {
+        store[kind] = store[kind].filter(function (e) { return e.id !== id; });
+        if (KIND_MULTI[kind]) delete moduleChecked[id];
+        else if (selected[kind] === id) selected[kind] = store[kind].length ? store[kind][0].id : null;
+        applySelection();
+        return;
+      }
+      if (KIND_MULTI[kind]) {
+        moduleChecked[id] = !moduleChecked[id];
+      } else {
+        selected[kind] = id;
+      }
+      applySelection();
+    });
+  });
+
+  ['preset', 'character', 'module'].forEach(function (kind) {
+    var box = document.querySelector('.ib[data-kind="' + kind + '"]');
+    box.querySelector('[data-act="pick"]').addEventListener('click', function () {
+      $('file-' + kind).click();
+    });
+    $('file-' + kind).addEventListener('change', function () {
+      addFiles(kind, Array.prototype.slice.call(this.files));
+      this.value = ''; // 같은 파일을 다시 고를 수 있게
+    });
+    box.addEventListener('dragover', function (ev) {
+      ev.preventDefault();
+      box.classList.add('drag');
+    });
+    box.addEventListener('dragleave', function () {
+      box.classList.remove('drag');
+    });
+    box.addEventListener('drop', function (ev) {
+      ev.preventDefault();
+      box.classList.remove('drag');
+      var files = Array.prototype.slice.call((ev.dataTransfer && ev.dataTransfer.files) || []);
+      addFiles(kind, files);
+    });
+  });
+
+  // textarea 를 직접 고치면 "적용 중" 표시를 지운다
+  var INVALIDATES = {
+    presetRegex: 'preset',
+    charRegex: 'character',
+    charTriggers: 'character',
+    charLua: 'character',
+    charName: 'character',
+    input: 'character',
+    moduleRegex: 'module',
+    moduleTriggers: 'module',
+    moduleLua: 'module'
+  };
+  function invalidateApplied(elId) {
+    var layer = INVALIDATES[elId];
+    if (!layer) return;
+    if (layer === 'module') {
+      if (applied.modules.length) {
+        applied.modules = [];
+        renderImportLists();
+      }
+      return;
+    }
+    if (applied[layer]) {
+      applied[layer] = null;
+      renderImportLists();
+    }
+  }
+
+  renderImportLists();
+
   // ---- 이벤트 ----
   document.querySelectorAll('.tabs button').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -907,16 +1367,27 @@
     setJson($('moduleTriggers'), $('moduleTriggersErr'), DEMO.moduleTriggers);
     setJson($('vars'), $('varsErr'), DEMO.vars);
     setJson($('globalVars'), $('globalVarsErr'), DEMO.globalVars);
+    applied = { preset: null, character: null, modules: [] };
+    renderImportLists();
     run();
   });
 
   $('runBtn').addEventListener('click', function () { run().catch(function (e) { console.error(e); }); });
+
+  ['traceRender', 'traceCbs'].forEach(function (id) {
+    $(id).addEventListener('change', function () {
+      run().catch(function (e) { console.error(e); });
+    });
+  });
 
   var timer = null;
   document.querySelectorAll('textarea, input, select').forEach(function (el) {
     el.addEventListener('input', function () {
       clearTimeout(timer);
       saveAssetSettings();
+      if (el.id && el.type !== 'file' && el.type !== 'radio' && el.type !== 'checkbox') {
+        invalidateApplied(el.id);
+      }
       timer = setTimeout(function () { run().catch(function (e) { console.error(e); }); }, 250);
     });
   });

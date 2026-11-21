@@ -1,0 +1,32 @@
+{
+  "name": "Fixture Preset",
+  "presetVersion": 2,
+  "regex": [
+    {
+      "comment": "프리셋: 앞에 배지",
+      "type": "editdisplay",
+      "in": "^([\\s\\S]*)$",
+      "out": "<div class=\"pbadge\">P</div>\n$1",
+      "ableFlag": true,
+      "flag": "g"
+    },
+    {
+      "comment": "프리셋: order 5 (모듈 order 10 보다 늦게)",
+      "type": "editdisplay",
+      "in": "P</div>",
+      "out": "P!</div>",
+      "ableFlag": true,
+      "flag": "g,<order 5>"
+    }
+  ],
+  "templateDefaultVariables": "{\"hp\":\"77\",\"toggle_flag\":\"1\"}",
+  "temperature": 80,
+  "promptTemplate": [
+    {
+      "type": "plain",
+      "type2": "main",
+      "text": "You are {{char}}.",
+      "role": "system"
+    }
+  ]
+}
