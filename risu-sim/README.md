@@ -112,13 +112,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-100개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+103개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (100 checks)</pre>
+# → <pre id="out">ALL PASS (103 checks)</pre>
 ```
 
 ## 보기 모드 — 실제 이미지 / HTML 코드
@@ -183,6 +183,25 @@ caption / divider             → 라벨 / 구분선
 | **트리거 실행** | `runTrigger` 5곳을 모두 건너뛰고 트레이스에 "사용 안 함" 표시 |
 | **Lua 실행** | `listenEdit` 훅을 실행하지 않음 |
 | **변수 유지** | 매 실행을 입력값에서 시작 (트리거가 바꾼 변수가 이어지지 않음) |
+
+## 카드 배경 (backgroundHTML)
+
+카드 UI 봇의 배경 이미지·CSS는 **메시지 안이 아니라** `character.backgroundHTML` /
+`module.backgroundEmbedding` 에 있습니다. RisuAI는 이걸 메시지 뒤 레이어로 렌더링합니다
+(`BackgroundDom.svelte`).
+
+```svelte
+<ParseMarkdown(risuChatParser((backgroundHTML || '') + '\n' + moduleBackgroundEmbedding), char, 'back') />
+```
+
+시뮬레이터도 캐릭터 + 체크된 모듈의 배경을 합쳐 결과 영역 뒤에 깔아 줍니다.
+
+- `'back'` 모드라 마크다운은 건너뛰고 **CSS 스코프·살균만** 적용합니다
+- `{{raw::x}}` / `{{image::x}}` 같은 에셋 태그도 여기서 해석됩니다
+- `hideChatIcon` / 모듈 `hideIcon` 이 켜져 있으면 아바타를 숨깁니다
+
+> `markdown` 을 꺼도 `<style>` 은 `encodeStyle` 을 거친 상태로 넘겨야 스코프가 걸립니다.
+> (이전에는 마크다운 off 일 때 원문을 그대로 넘겨서 CSS 가 스코프되지 않았습니다)
 
 ## 에셋 이미지
 

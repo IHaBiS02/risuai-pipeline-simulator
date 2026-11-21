@@ -484,6 +484,9 @@ async function main() {
             }
           ],
           toggles: 'cot=CoT 로그\ntone=톤=select=밝게,어둡게\nnote=메모=text',
+          backgroundHTML:
+            '<style>.bgwrap{position:absolute;inset:0;background:url({{raw::banner}}) center/cover no-repeat;opacity:.55}</style>' +
+            '<div class="bgwrap"></div>',
           defaultVariables: 'view=normal\nclosed=1\nreveal=yes',
           additionalAssets: [['banner', '', 'png']]
         }

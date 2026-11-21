@@ -138,8 +138,17 @@
   /* ---- 렌더 프리뷰 ---- */
   #previewWrap {
     border: 1px solid var(--line); border-radius: 9px; background: #0a0e15;
-    padding: 14px; overflow: auto;
+    padding: 14px; overflow: auto; position: relative;
   }
+  /* 카드 배경(backgroundHTML / module.backgroundEmbedding) —
+     RisuAI BackgroundDom.svelte 처럼 메시지 뒤 레이어로 깔린다 */
+  #bgLayer {
+    position: absolute; inset: 0; overflow: hidden;
+    border-radius: 9px; pointer-events: none;
+  }
+  #bgLayer:empty { display: none; }
+  #bgLayer img { max-width: 100%; }
+  .chatlog { position: relative; z-index: 1; }
   /* 카드 CSS 는 .chattext 하위로만 적용된다 (RisuAI 와 동일) */
   .chattext { color: var(--text); font-size: 14px; line-height: 1.7; }
 
@@ -562,6 +571,7 @@
     <div class="pane active" id="pane-trace"></div>
     <div class="pane" id="pane-preview">
       <div id="previewWrap">
+        <div id="bgLayer" class="chattext"></div>
         <div class="chatlog">
           <div class="chatrow" id="chatRow">
             <div class="avatar" id="chatAvatar">R</div>
@@ -1132,6 +1142,42 @@
     host.innerHTML = html;
   }
 
+  // 카드 배경: character.backgroundHTML + 모듈 backgroundEmbedding
+  //   RisuAI BackgroundDom.svelte: ParseMarkdown(risuChatParser(bg + '\n' + moduleBg), char, 'back')
+  //   'back' 모드라 마크다운은 건너뛰고 CSS 스코프/살균만 한다.
+  function renderBackground() {
+    var layer = $('bgLayer');
+    var parts = [];
+    var ch = findEntry('character', selected.character);
+    if (ch && ch.character && ch.character.backgroundHTML) parts.push(ch.character.backgroundHTML);
+    store.module.forEach(function (m) {
+      if (moduleChecked[m.id] && m.backgroundEmbedding) parts.push(m.backgroundEmbedding);
+    });
+    if (!parts.length) {
+      layer.innerHTML = '';
+      return;
+    }
+    var cfg = {
+      markdown: false,
+      expandCbs: true,
+      scope: '.chattext',
+      assets: (readAssetConfig() || {}).assetNames || [],
+      srcOf: assetSrcOf,
+      charName: $('charName').value,
+      userName: $('userName').value,
+      vars: live.vars,
+      globalVars: live.globalVars,
+      prevMessage: $('prevMessage').value
+    };
+    try {
+      var r = window.RisuSim.renderDisplay(parts.join('\n'), cfg);
+      layer.innerHTML = r.html;
+    } catch (e) {
+      layer.innerHTML = '';
+      console.error(e);
+    }
+  }
+
   function renderPreview(result) {
     var host = $('preview');
 
@@ -1139,6 +1185,8 @@
     var isUser = $('mode').value === 'editinput';
     var who = isUser ? ($('userName').value || 'User') : ($('charName').value || 'Char');
     $('chatRow').className = 'chatrow' + (isUser ? ' user' : '');
+    renderBackground();
+
     var av = $('chatAvatar');
     var iconUrl = isUser ? null : assetSrcOf('main');
     if (iconUrl) {
@@ -1150,6 +1198,15 @@
       av.style.backgroundImage = '';
       av.textContent = (who.trim().charAt(0) || '?').toUpperCase();
     }
+    // 카드가 아이콘 숨김을 지정하면 아바타를 감춘다 (HideIconStore)
+    var hideIcon = false;
+    var curChar = findEntry('character', selected.character);
+    if (curChar && curChar.character && curChar.character.hideChatIcon) hideIcon = true;
+    store.module.forEach(function (m) {
+      if (moduleChecked[m.id] && m.hideIcon) hideIcon = true;
+    });
+    av.style.display = hideIcon ? 'none' : '';
+
     $('chatName').textContent = who + (isUser ? ' (입력 단계)' : '');
 
     if (result.display.html) {

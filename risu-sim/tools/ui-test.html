@@ -301,6 +301,12 @@
       return !!m && m[1].length > 10;
     })(), ciHtml.slice(0, 300));
 
+    // ---------- 카드 배경 (backgroundHTML) ----------
+    var bg = d.getElementById('bgLayer');
+    ok('배경 레이어에 내용이 있음', bg.innerHTML.length > 10, bg.innerHTML.slice(0, 200));
+    ok('배경 CSS 가 스코프됨', /\.chattext \.x-risu-bgwrap/.test(bg.innerHTML), bg.innerHTML.slice(0, 300));
+    ok('배경 이미지가 실제 blob URL', /url\(blob:/.test(bg.innerHTML), bg.innerHTML.slice(0, 300));
+
     // ---------- 모듈 토글 / 버튼 트리거 / 변수 편집 ----------
     // (카드 UI 봇: toggles=cot(체크박스), tone(select), note(text), 트리거 'open')
     ok('모듈 토글 패널 표시', d.getElementById('toggleField').style.display !== 'none',

@@ -1451,6 +1451,8 @@
       lorebook: Array.isArray(module.lorebook) ? module.lorebook : [],
       assets: assetNamesOf(module.assets),
       vars: {},
+      backgroundEmbedding: typeof module.backgroundEmbedding === 'string' ? module.backgroundEmbedding : '',
+      hideIcon: !!module.hideIcon,
       toggles: typeof module.customModuleToggle === 'string' ? module.customModuleToggle : '',
       module: module,
       warnings: warnings

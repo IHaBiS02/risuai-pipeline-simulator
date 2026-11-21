@@ -1814,7 +1814,8 @@
         return { encoded: encodedNoDom, markdown: text, html: escapeHtml(text), css: '' };
       }
       var encoded = encodedNoDom;
-      var md = config.markdown === false ? text : renderMarkdown(encoded);
+      // markdown off 여도 encodeStyle 을 거친 문자열을 넘긴다 (안 그러면 CSS 스코프가 없다)
+      var md = config.markdown === false ? encoded : renderMarkdown(encoded);
       var html = trimMarkdown(md, ctx);
       var tpl = document.createElement('template');
       tpl.innerHTML = html;
@@ -1922,7 +1923,8 @@
     }
 
     var encoded = encodeStyle(src);
-    var md = opts.markdown === false ? src : renderMarkdown(encoded);
+    // 'back' 모드(마크다운 생략)에서도 <style> 스코프는 적용되어야 한다
+    var md = opts.markdown === false ? encoded : renderMarkdown(encoded);
 
     if (typeof document === 'undefined') {
       return { html: escapeHtml(src).replace(/\n/g, '<br>'), css: '', encoded: encoded, markdown: md };
