@@ -301,6 +301,79 @@
       return !!m && m[1].length > 10;
     })(), ciHtml.slice(0, 300));
 
+    // ---------- 모듈 토글 / 버튼 트리거 / 변수 편집 ----------
+    // (카드 UI 봇: toggles=cot(체크박스), tone(select), note(text), 트리거 'open')
+    ok('모듈 토글 패널 표시', d.getElementById('toggleField').style.display !== 'none',
+      d.getElementById('toggleField').style.display);
+    var cot = d.querySelector('#toggleHost input[type="checkbox"][data-tkey="cot"]');
+    ok('체크박스 토글 생성', !!cot);
+    var tone = d.querySelector('#toggleHost select[data-tkey="tone"]');
+    ok('select 토글 생성', !!tone && tone.options.length === 2, tone ? tone.options.length : 'null');
+    var note = d.querySelector('#toggleHost input[type="text"][data-tkey="note"]');
+    ok('text 토글 생성', !!note);
+
+    // 체크박스 끄기 → toggle_cot=0 → COT 사라짐, 켜기 → 다시 나타남
+    function cotRendered() { return d.getElementById('htmlOut').textContent.indexOf('x-risu-cot') >= 0; }
+    cot = d.querySelector('#toggleHost input[type="checkbox"][data-tkey="cot"]');
+    cot.checked = false;
+    cot.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(1800);
+    ok('토글 끄면 COT 사라짐', !cotRendered(), d.getElementById('htmlOut').textContent.slice(0, 400));
+    ok('toggle_cot=0 저장', JSON.parse(d.getElementById('globalVars').value).toggle_cot === '0',
+      d.getElementById('globalVars').value.slice(0, 120));
+
+    cot = d.querySelector('#toggleHost input[type="checkbox"][data-tkey="cot"]');
+    cot.checked = true;
+    cot.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(1800);
+    ok('토글 켜면 COT 렌더', cotRendered(),
+      d.getElementById('htmlOut').textContent.slice(0, 400));
+    ok('전역 변수에 toggle_cot=1', JSON.parse(d.getElementById('globalVars').value).toggle_cot === '1',
+      d.getElementById('globalVars').value.slice(0, 120));
+
+    // select 토글
+    tone = d.querySelector('#toggleHost select[data-tkey="tone"]');
+    tone.value = '1';
+    tone.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(1500);
+    ok('select 토글 값 반영', JSON.parse(d.getElementById('globalVars').value).toggle_tone === '1',
+      d.getElementById('globalVars').value.slice(0, 160));
+
+    // 버튼 트리거: <button risu-trigger="open"> → 발동 시 revealed=1
+    ok('버튼 트리거 전에는 OPENED 없음', d.getElementById('htmlOut').textContent.indexOf('x-risu-revealed') < 0);
+    var btn = d.querySelector('#preview [risu-trigger]');
+    ok('프리뷰에 risu-trigger 버튼 존재', !!btn, d.getElementById('preview').innerHTML.slice(0, 200));
+    btn = d.querySelector('#preview [risu-trigger]');
+    btn.click();
+    await sleep(2000);
+    ok('버튼 트리거 실행 후 OPENED 렌더', d.getElementById('htmlOut').textContent.indexOf('x-risu-revealed') >= 0,
+      d.getElementById('htmlOut').textContent.slice(0, 400));
+    ok('트리거 trace 에 manual 패스', /버튼 트리거/.test(d.getElementById('pane-trace').textContent),
+      d.getElementById('pane-trace').textContent.slice(0, 200));
+    ok('채팅 변수 revealed=1', JSON.parse(d.getElementById('vars').value).revealed === '1',
+      d.getElementById('vars').value);
+
+    // 변수 편집기
+    var rows = d.querySelectorAll('#varRowsChat .varrow');
+    ok('변수 편집기 행 생성', rows.length > 0, String(rows.length));
+    var valInput = d.querySelector('#varRowsChat .varrow input[data-part="val"]');
+    valInput.value = 'X1';
+    valInput.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await sleep(1200);
+
+    // 기능 토글: 트리거 끄기
+    var beforeTrace = d.getElementById('pane-trace').textContent.length;
+    d.getElementById('featTriggers').checked = false;
+    d.getElementById('featTriggers').dispatchEvent(new w.Event('change', { bubbles: true }));
+    d.getElementById('featTriggers').dispatchEvent(new w.Event('input', { bubbles: true }));
+    await sleep(2000);
+    ok('트리거 끄면 trace 에 사용 안 함', /사용 안 함/.test(d.getElementById('pane-trace').textContent),
+      d.getElementById('pane-trace').textContent.slice(0, 300));
+    d.getElementById('featTriggers').checked = true;
+    d.getElementById('featTriggers').dispatchEvent(new w.Event('change', { bubbles: true }));
+    d.getElementById('featTriggers').dispatchEvent(new w.Event('input', { bubbles: true }));
+    await sleep(1500);
+
     // ---------- textarea 직접 수정 → 적용 표시 해제 ----------
     var ta = d.getElementById('charRegex');
     ta.value = '[]';

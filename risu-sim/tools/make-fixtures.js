@@ -440,7 +440,10 @@ async function main() {
   const CARDUI_FIRST = [
     '<div class="ui-container">',
     '<div class="parchment-bg"></div>',
-    '<button class="fm-title-btn" risu-trigger="toggle">!!! TEST PARTY !!!</button>',
+    '<button class="fm-title-btn" risu-trigger="open">!!! TEST PARTY !!!</button>',
+    '{{#when::{{getvar::revealed}}::is::1}}<div class="revealed">OPENED</div>{{/when}}',
+    '{{#when::toggle::cot}}<div class="cot">COT ON</div>{{/when}}',
+    '{{#when::toggle::tone::is::1}}<div class="tone1">TONE DARK</div>{{/when}}',
     '{{#when::{{getvar::view}}::isnot::demon}}',
     '{{#when::{{getvar::closed}}::isnot::0}}<div class="fm-sub-ti">Click here to get started</div>',
     '{{/when}}',
@@ -472,7 +475,15 @@ async function main() {
       extensions: {
         risuai: {
           customScripts: [],
-          triggerscript: [],
+          triggerscript: [
+            {
+              comment: 'open',
+              type: 'display',
+              conditions: [],
+              effect: [{ type: 'v2SetVar', var: 'revealed', operator: '=', value: '1', indent: 0 }]
+            }
+          ],
+          toggles: 'cot=CoT 로그\ntone=톤=select=밝게,어둡게\nnote=메모=text',
           defaultVariables: '{"view":"normal","closed":"1","reveal":"yes"}',
           additionalAssets: [['banner', '', 'png']]
         }

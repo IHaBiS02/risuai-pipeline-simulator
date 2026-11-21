@@ -12,7 +12,7 @@ risu-sim/
 ├── asset-runtime.js    동적 에셋 (OpenAI 호환 /embeddings)
 ├── trigger-runtime.js  트리거 VM (조건 / indent 인터프리터 / 35 effect)
 ├── ADDING-RUNTIMES.md  트리거·플러그인·동적 에셋 설계
-├── test.js             단위 테스트 114개 (node test.js)
+├── test.js             단위 테스트 125개 (node test.js)
 ├── tools/
 │   ├── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
 │   ├── make-fixtures.js    테스트용 실제 포맷 파일 생성기 (msgpackr + fflate)
@@ -24,6 +24,7 @@ risu-sim/
 │   └── lua/json.lua    RisuAI 가 쓰는 json 라이브러리
 ├── shot-cardui.png     HTML 카드 UI 봇 렌더 (실제 이미지 모드)
 ├── shot-htmlmode.png   같은 결과를 HTML 코드 모드로
+├── shot-toggles.png    모듈 토글 + 변수 편집기
 ├── shot-import.png     파일 불러오기 + 트레이스
 ├── shot-after.png      After 렌더 (중간 단계)
 ├── shot-preview.png    채팅 프리뷰
@@ -107,13 +108,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-84개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+100개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (84 checks)</pre>
+# → <pre id="out">ALL PASS (100 checks)</pre>
 ```
 
 ## 보기 모드 — 실제 이미지 / HTML 코드
@@ -132,6 +133,52 @@ chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
 - 선택은 `localStorage` 에 저장됩니다.
 - **HTML 코드** 모드에서는 트레이스의 after 블록도 소스로 표시됩니다 (렌더 블록을 만들지 않음).
 - 실제 이미지 모드에서만 `.rendered` 블록이 생기므로, 큰 카드에서 렌더가 느릴 때 HTML 모드를 쓰면 됩니다.
+
+## 트리거 · 변수 · 토글
+
+### 버튼 트리거 (`risu-trigger`)
+
+미리보기의 `<button risu-trigger="이름">` 을 **클릭하면 그 트리거가 실행**됩니다
+(`Chat.svelte:305` → `runTrigger('manual', { manualName })`). 실행 후 결과로 다시 렌더링합니다.
+
+### 변수 — 하나의 공간
+
+원본은 채팅 변수를 `chat.scriptstate['$key']` 에 저장합니다 (`chatVar.svelte.ts:6`).
+**트리거 `v2SetVar` 도 같은 곳에 씁니다** (`triggers.ts:1203`). 그래서
+트리거가 바꾼 값을 `{{getvar::x}}` 가 그대로 읽습니다 — 시뮬레이터도 동일하게 통일했습니다.
+
+| | 저장 위치 |
+|---|---|
+| `{{getvar::x}}` / `{{setvar::x::v}}` | `scriptstate['$x']` |
+| 트리거 `v2SetVar` | `scriptstate['$x']` |
+| `{{getglobalvar::x}}` / `{{setglobalvar::x::v}}` | 전역 변수 (`toggle_*` 포함) |
+
+없는 변수는 원본과 같이 문자열 `null` 을 돌려줍니다.
+
+**변수 탭**에서 값을 직접 고칠 수 있습니다 (키/값 편집, 추가, 삭제 → 즉시 재실행).
+
+### 모듈 토글 (`customModuleToggle`)
+
+`key=라벨=타입=옵션` 형식을 그대로 파싱합니다 (`util.ts:1049` 포팅).
+
+```
+cot=CoT 로그                 → 체크박스 (toggle_cot = '1' / '0')
+tone=톤=select=밝게,어둡게    → 셀렉트 (선택 인덱스)
+note=메모=text                → 텍스트 입력
+group=그룹=group … groupEnd   → 접히는 그룹
+caption / divider             → 라벨 / 구분선
+```
+
+값은 전역 변수 `toggle_<key>` 에 들어가고, 카드에서는 `{{#when::toggle::cot}}` 로 읽습니다.
+**패널을 다시 그리지 않고 값만 맞추기** 때문에 조작 중에 포커스나 체크가 날아가지 않습니다.
+
+### 실행 기능 토글
+
+| 스위치 | 끄면 |
+|---|---|
+| **트리거 실행** | `runTrigger` 5곳을 모두 건너뛰고 트레이스에 "사용 안 함" 표시 |
+| **Lua 실행** | `listenEdit` 훅을 실행하지 않음 |
+| **변수 유지** | 매 실행을 입력값에서 시작 (트리거가 바꾼 변수가 이어지지 않음) |
 
 ## 에셋 이미지
 
@@ -186,7 +233,7 @@ after  [RENDER · CBS]
 
 ```bash
 cd risu-sim && node test.js
-# → 114 passed, 0 failed
+# → 125 passed, 0 failed
 ```
 
 ## 트리거

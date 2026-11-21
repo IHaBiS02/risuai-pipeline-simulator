@@ -488,7 +488,53 @@ console.log('\n[24] 에셋 이미지 — charx 바이트 추출 + srcOf');
   eq('raw 는 URL 문자열', rawTag, 'url(blob:x)');
 }
 
-console.log('\n[25] importer 로 읽은 봇 → 파이프라인 실행');
+console.log('\n[25] 변수 공간 통일 — getvar == scriptstate[$k]');
+{
+  // RisuAI chatVar.svelte.ts:6 — 채팅 변수는 chat.scriptstate['$key'] 다.
+  const eff = [{ type: 'v2SetVar', var: 'revealed', operator: '=', value: '1', indent: 0 }];
+  const trig = [{ comment: 'open', type: 'display', conditions: [], effect: eff }];
+
+  const r = await sim.run({
+    mode: 'editdisplay',
+    input: '{{getvar::revealed}}',
+    charRegex: [],
+    charTriggers: trig,
+    manualTrigger: 'open'
+  });
+  eq('수동 트리거가 바꾼 변수를 getvar 가 읽음', r.finalText.trim(), '1');
+  eq('varsAfter 에 revealed', r.varsAfter.revealed, '1');
+  eq('scriptstate 도 같이 갱신', r.scriptstateAfter['$revealed'], '1');
+
+  // setvar CBS 도 같은 공간에 쓴다
+  const r2 = await sim.run({
+    mode: 'editoutput',
+    input: '{{setvar::hp::9}}{{getvar::hp}}',
+    charRegex: []
+  });
+  eq('setvar → getvar 왕복', r2.finalText.includes('9'), true);
+  eq('setvar 가 scriptstate 에 기록', r2.scriptstateAfter['$hp'], '9');
+
+  // 없는 변수는 원본과 같이 'null' 문자열
+  const r3 = await sim.run({ mode: 'editoutput', input: '{{getvar::nothing}}', charRegex: [] });
+  eq("없는 변수는 'null'", r3.finalText.trim(), 'null');
+}
+
+console.log('\n[26] 기능 토글 — 트리거/Lua 끄기');
+{
+  const trig = [{ comment: 't', type: 'display', conditions: [], effect: [{ type: 'v2SetVar', var: 'x', value: '1', indent: 0 }] }];
+  const on = await sim.run({ mode: 'editdisplay', input: 'a', charRegex: [], charTriggers: trig });
+  eq('트리거 켜면 발화', /트리거\(display\)/.test(on.trace.map((t) => t.stage).join(',')), true);
+  eq('트리거 켜면 실행됨', on.trace.some((t) => t.triggerTrace && t.triggerTrace.some((x) => !x.skipped)), true);
+
+  const off = await sim.run({ mode: 'editdisplay', input: 'a', charRegex: [], charTriggers: trig, triggersEnabled: false });
+  eq('트리거 끄면 스킵 단계', off.trace.some((t) => /사용 안 함/.test(t.detail || '')), true);
+  eq('트리거 끄면 변수 안 바뀜', off.varsAfter.x, undefined);
+
+  const luaOff = await sim.run({ mode: 'editdisplay', input: 'a', charRegex: [], luaEnabled: false });
+  eq('Lua 끄면 스킵 표시', luaOff.trace.some((t) => t.stage === '① Lua' && /사용 안 함/.test(t.detail || '')), true);
+}
+
+console.log('\n[27] importer 로 읽은 봇 → 파이프라인 실행');
 {
   const imp = require('./importer.js');
   const path = require('path');

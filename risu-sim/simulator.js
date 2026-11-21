@@ -51,6 +51,26 @@
     return s === 'true' || s === '1';
   }
 
+  // chatVar.svelte.ts:6 getChatVar — 채팅 변수는 scriptstate['$key'] 에 저장된다.
+  // 트리거 v2SetVar 도 같은 곳에 쓴다 (triggers.ts:1203 setVar). 즉 같은 공간이다.
+  function chatVarGet(ctx, key) {
+    var ss = ctx.scriptstate;
+    if (ss) {
+      var v = ss['$' + key];
+      if (v !== undefined && v !== null) return String(v);
+    }
+    // 초기값(textarea / defaultVariables)은 ctx.vars 에 있다
+    if (ctx.vars && ctx.vars[key] != null) return String(ctx.vars[key]);
+    return 'null';
+  }
+
+  function chatVarSet(ctx, key, value) {
+    if (!ctx.scriptstate) ctx.scriptstate = {};
+    ctx.scriptstate['$' + key] = String(value);
+    // ctx.vars 를 읽는 코드(정규식 등)와도 맞춰 둔다
+    if (ctx.vars) ctx.vars[key] = String(value);
+  }
+
   // ==================================================================
   // 1. CBS ({{...}})
   //    원본: src/ts/parser/parser.svelte.ts:1599 risuChatParser
@@ -372,6 +392,9 @@
     if (raw == null) return '';
     var s = String(raw);
     if (s.indexOf('{{') >= 0) return cbsParse(s, ctx);
+    if (s.indexOf('getvar::') === 0) return chatVarGet(ctx, s.slice(8));
+    if (s.indexOf('getglobalvar::') === 0) return ctx.globalVars[s.slice(14)] != null ? String(ctx.globalVars[s.slice(14)]) : 'null';
+    if (ctx.scriptstate && ctx.scriptstate['$' + s] !== undefined) return String(ctx.scriptstate['$' + s]);
     var m = s.match(/^(getvar|getglobalvar)::(.+)$/);
     if (m) {
       return m[1] === 'getvar' ? ctx.vars[m[2]] || '' : ctx.globalVars[m[2]] || '';
@@ -388,15 +411,15 @@
     switch (name) {
       // --- 변수 ---
       case 'getvar':
-        return ctx.vars[rest[0]] != null ? ctx.vars[rest[0]] : '';
+        return chatVarGet(ctx, rest[0]);
       case 'setvar':
-        ctx.vars[rest[0]] = rest.slice(1).join('::');
+        chatVarSet(ctx, rest[0], rest.slice(1).join('::'));
         return '';
       case 'addvar':
-        ctx.vars[rest[0]] = (ctx.vars[rest[0]] || '') + rest.slice(1).join('::');
+        chatVarSet(ctx, rest[0], chatVarGet(ctx, rest[0]) === 'null' ? rest.slice(1).join('::') : chatVarGet(ctx, rest[0]) + rest.slice(1).join('::'));
         return '';
       case 'setdefaultvar':
-        if (ctx.vars[rest[0]] == null) ctx.vars[rest[0]] = rest.slice(1).join('::');
+        if (chatVarGet(ctx, rest[0]) === 'null') chatVarSet(ctx, rest[0], rest.slice(1).join('::'));
         return '';
       case 'getglobalvar':
         return ctx.globalVars[rest[0]] != null ? ctx.globalVars[rest[0]] : '';
@@ -688,7 +711,9 @@
     else if (mode === 'editoutput') luaMode = 'editOutput';
     else if (mode === 'editdisplay') luaMode = 'editDisplay';
 
-    if (luaMode && window.RisuLua) {
+    if (config.luaEnabled === false) {
+      trace.push({ stage: '① Lua', detail: '사용 안 함 (기능 토글)', skipped: true });
+    } else if (luaMode && window.RisuLua) {
       var luaTriggers = allTriggers(config);
       var beforeLua = data;
       try {
@@ -735,7 +760,9 @@
     }
 
     // ② display 트리거 (triggers.ts:1058 runTrigger, displayMode)
-    if (mode === 'editdisplay' && window.RisuTrigger) {
+    if (config.triggersEnabled === false) {
+      trace.push({ stage: '② 트리거(display)', detail: '사용 안 함 (기능 토글)', skipped: true });
+    } else if (mode === 'editdisplay' && window.RisuTrigger) {
       var beforeTrig = data;
       try {
         var runner = window.RisuTrigger.create(ctx, {
@@ -1625,6 +1652,8 @@
     var ctx = {
       vars: Object.assign({}, config.vars || {}),
       globalVars: Object.assign({}, config.globalVars || {}),
+      scriptstate: Object.assign({}, config.scriptstate || {}),
+      // (아래에서 config.vars 를 scriptstate['$k'] 로 시드한다)
       charName: config.charName || 'Char',
       userName: config.userName || 'User',
       role: config.role || '',
@@ -1642,6 +1671,11 @@
         : [{ role: 'char', data: config.input || '' }]
     };
 
+    // 초기 채팅 변수(textarea / defaultVariables)를 scriptstate 로 시드
+    Object.keys(config.vars || {}).forEach(function (k) {
+      if (ctx.scriptstate['$' + k] === undefined) ctx.scriptstate['$' + k] = String(config.vars[k]);
+    });
+
     var char = { customscript: config.charRegex || [] };
     var mode = config.mode || 'editdisplay';
     var assetNames = (config.assets && config.assets.assetNames) || [];
@@ -1649,15 +1683,16 @@
     // 에셋 이름 → 실제 이미지 URL (불러온 카드의 blob:). 없으면 자리표시자.
     var assetSrcOf = (config.assets && config.assets.srcOf) || null;
 
-    async function runTriggerPass(passMode) {
+    async function runTriggerPass(passMode, arg) {
       if (!window.RisuTrigger) return null;
       var runner = window.RisuTrigger.create(ctx, {
         charTriggers: allTriggers(config),
         moduleTriggers: [],
         chat: ctx.chat
       });
-      var r = await runner.run(passMode);
+      var r = await runner.run(passMode, arg);
       ctx.chat = r.chat;
+      if (r.scriptstate) ctx.scriptstate = r.scriptstate;
       return r;
     }
 
@@ -1665,7 +1700,28 @@
     //   editinput   ↔ runTrigger('input')   (DefaultChatScreen.svelte:187)
     //   editprocess ↔ runTrigger('start')   (index.svelte.ts:888)
     var preTrace = [];
-    if (mode === 'editinput' || mode === 'editprocess') {
+
+    // 버튼(risu-trigger)으로 실행된 수동 트리거 — Chat.svelte:317 runTrigger('manual')
+    if (config.manualTrigger) {
+      if (config.triggersEnabled === false) {
+        preTrace.push({ stage: '⓪ 버튼 트리거', detail: '사용 안 함 (기능 토글)', skipped: true });
+      } else {
+        var manRun = await runTriggerPass('manual', { manualName: config.manualTrigger });
+        if (manRun) {
+          var manFired = manRun.trace.filter(function (x) { return !x.skipped; }).length;
+          preTrace.push({
+            stage: '⓪ 버튼 트리거("' + config.manualTrigger + '")',
+            detail: 'runTrigger("manual") — 트리거 ' + manRun.trace.length + '개 중 ' + manFired + '개 실행',
+            triggerTrace: manRun.trace,
+            skipped: manFired === 0
+          });
+        }
+      }
+    }
+
+    if (config.triggersEnabled === false) {
+      preTrace.push({ stage: '⓪ 트리거', detail: '사용 안 함 (기능 토글)', skipped: true });
+    } else if (mode === 'editinput' || mode === 'editprocess') {
       var passName = mode === 'editinput' ? 'input' : 'start';
       var preRun = await runTriggerPass(passName);
       if (preRun) {
@@ -1700,6 +1756,8 @@
         moduleLua: config.moduleLua || [],
         assets: config.assets || null,
         assetSrcOf: (config.assets && config.assets.srcOf) || null,
+        triggersEnabled: config.triggersEnabled !== false,
+        luaEnabled: config.luaEnabled !== false,
         charTriggers: config.charTriggers || [],
         moduleTriggers: config.moduleTriggers || []
       },
@@ -1711,7 +1769,7 @@
     var finalText = textResult.data;
 
     // 출력 트리거 (index.svelte.ts:1763, 1871)
-    if (mode === 'editoutput') {
+    if (mode === 'editoutput' && config.triggersEnabled !== false) {
       var outRun = await runTriggerPass('output');
       if (outRun) {
         var outFired = outRun.trace.filter(function (x) { return !x.skipped; }).length;
@@ -1791,7 +1849,13 @@
       trace: textResult.trace,
       finalText: finalText,
       display: display,
-      varsAfter: ctx.vars,
+      varsAfter: (function () {
+        var out = {};
+        Object.keys(ctx.scriptstate || {}).forEach(function (k) {
+          if (k.charAt(0) === '$') out[k.slice(1)] = ctx.scriptstate[k];
+        });
+        return out;
+      })(),
       globalVarsAfter: ctx.globalVars,
       chatAfter: ctx.chat,
       scriptstateAfter: ctx.scriptstate || {},
@@ -1805,8 +1869,13 @@
   // ==================================================================
 
   function makeDisplayCtx(o) {
+    var seedSs = {};
+    Object.keys(o.vars || {}).forEach(function (k) {
+      seedSs['$' + k] = String(o.vars[k]);
+    });
     return {
       vars: Object.assign({}, o.vars || {}),
+      scriptstate: seedSs,
       globalVars: Object.assign({}, o.globalVars || {}),
       charName: o.charName || 'Char',
       userName: o.userName || 'User',

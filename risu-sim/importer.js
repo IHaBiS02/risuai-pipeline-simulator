@@ -1079,7 +1079,7 @@
         hideChatIcon: !!risu.hideChatIcon,
         lowLevelAccess: !!risu.lowLevelAccess,
         moduleNamespace: risu.moduleNamespace,
-        toggles: risu.toggles || {},
+        toggles: risu.toggles,
         character_book: data.character_book || null,
         assets: Array.isArray(data.assets) ? data.assets : []
       };
@@ -1419,6 +1419,7 @@
       lorebook: Array.isArray(module.lorebook) ? module.lorebook : [],
       assets: assetNamesOf(module.assets),
       vars: {},
+      toggles: typeof module.customModuleToggle === 'string' ? module.customModuleToggle : '',
       module: module,
       warnings: warnings
     };
@@ -1614,6 +1615,7 @@
       lorebook: lore,
       assets: assets,
       vars: vars,
+      toggles: typeof n.toggles === 'string' ? n.toggles : '',
       character: {
         name: n.name,
         firstMessage: n.firstMessage,

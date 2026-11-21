@@ -12,6 +12,7 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 - **트리거** VM — 조건 평가, indent 인터프리터, display/request allowlist
 - **동적 에셋** — OpenAI 호환 `/embeddings` 로 에셋 이름 유사도 매칭
 - **파일 불러오기** — `.risup` 프리셋 / `.charx` 봇 카드 / `.module` 모듈을 그대로 읽어서 적용
+- **트리거 · 변수 · 토글** — `risu-trigger` 버튼 실행, 변수 편집기, `customModuleToggle` 스위치
 - **보기 모드 2종** — 결과를 **실제 이미지**(카드 CSS·에셋 적용) 또는 **HTML 코드**(최종 소스)로
 - **After 렌더** — 트레이스의 각 단계 결과도 같은 보기 모드로 표시
 
@@ -33,7 +34,7 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 │   ├── lua-runtime.js            # Lua (wasmoon)
 │   ├── trigger-runtime.js        # 트리거 VM
 │   ├── asset-runtime.js          # 동적 에셋 (OpenAI 호환 임베딩)
-│   ├── test.js                   # 단위 테스트 114개
+│   ├── test.js                   # 단위 테스트 125개
 │   ├── tools/                    # 픽스처 생성기 · 브라우저 UI 테스트 · 목 임베딩 서버
 │   └── vendor/                   # wasmoon, json.lua (오프라인 동작용)
 ├── LICENSE                       # GPL-3.0
@@ -60,9 +61,9 @@ python3 -m http.server 8080
 
 ```bash
 cd risu-sim && node test.js
-# → 114 passed, 0 failed
+# → 125 passed, 0 failed
 
-# 브라우저 UI 통합 테스트 (파일 주입 + 클릭 84개 항목)
+# 브라우저 UI 통합 테스트 (파일 주입 + 클릭 100개 항목)
 python3 -m http.server 8901 &
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
@@ -87,6 +88,10 @@ http://localhost:8080/?asset=1&assetUrl=http://127.0.0.1:8899/v1&assetModel=mock
 **파일 불러오기** — `.risup` / `.charx` / `.module` 을 끌어다 놓으면 프리셋·봇·모듈 칸이 채워집니다
 
 ![불러오기](risu-sim/shot-import.png)
+
+**모듈 토글 + 변수 편집기** — 카드의 `customModuleToggle` 이 스위치로, 변수는 직접 편집
+
+![토글](risu-sim/shot-toggles.png)
 
 **HTML 카드 UI 봇** — `{{#when}}` 중첩 조건 + charx 안의 이미지로 실제 화면과 같게
 
@@ -125,6 +130,9 @@ http://localhost:8080/?asset=1&assetUrl=http://127.0.0.1:8899/v1&assetModel=mock
 | 트리거 VM + 35 effect | ✅ 1:1 | allowlist · 재귀 · indent |
 | 동적 에셋 | ✅ 1:1 | OpenAI 호환 `/embeddings` |
 | 파일 불러오기 (.risup/.charx/.module/.risum/.png) | ✅ 1:1 | `importer.js` |
+| 버튼 트리거 (`runTrigger('manual')`) | ✅ 1:1 | `Chat.svelte:305` |
+| 채팅 변수 = `scriptstate['$key']` 통일 | ✅ 1:1 | `chatVar.svelte.ts:6` |
+| 모듈 토글 (`customModuleToggle`) | ✅ 1:1 | `util.ts:1049` |
 | After 렌더 (자산·카드 CSS) | ✅ 추가 기능 | `renderDisplay()` |
 | 플러그인 (CJS) | ⬜ 미탑재 | 설계만 |
 | 플러그인 | ⬜ 미탑재 | 훅 6개 구현 예정 |
