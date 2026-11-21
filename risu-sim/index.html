@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="ko">
 <head>
+<!-- RisuAI 와 같은 채팅 CSS (tools/build-css.mjs) · 코드 블록 색 (parser.svelte.ts:17) -->
+<link rel="stylesheet" href="vendor/risu-chat.css">
+<link rel="stylesheet" href="vendor/atom-one-dark.min.css">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RisuAI 파이프라인 시뮬레이터</title>
@@ -137,9 +140,11 @@
 
   /* ---- 렌더 프리뷰 ---- */
   #previewWrap {
-    border: 1px solid var(--line); border-radius: 9px; background: #0a0e15;
-    padding: 14px; overflow: auto; position: relative;
+    border: 1px solid var(--line); border-radius: 9px;
+    overflow: auto; position: relative;
   }
+  /* 프리뷰 루트 = RisuAI 문서 루트 (risu-chat.css 가 여기에 preflight·테마 변수를 건다) */
+  #previewWrap > .risu-scope { position: relative; min-height: 100%; overflow: visible; }
   /* 카드 배경(backgroundHTML / module.backgroundEmbedding) —
      RisuAI BackgroundDom.svelte 처럼 메시지 뒤 레이어로 깔린다 */
   #bgLayer {
@@ -149,8 +154,6 @@
   #bgLayer:empty { display: none; }
   #bgLayer img { max-width: 100%; }
   .chatlog { position: relative; z-index: 1; }
-  /* 카드 CSS 는 .chattext 하위로만 적용된다 (RisuAI 와 동일) */
-  .chattext { color: var(--text); font-size: 14px; line-height: 1.7; }
 
   /* 에셋 자리표시자 (실제 이미지 대신 어떤 에셋이 들어갔는지 보여준다) */
   .x-risu-sim-asset, .x-risu-sim-bg {
@@ -166,14 +169,6 @@
     color: #5cc8ff; border: 1px solid #2b3a55; border-radius: 3px; padding: 0 3px;
   }
   .x-risu-sim-bg::before { color: var(--warn); }
-  .chattext p { margin: 0 0 10px; }
-  .chattext h1, .chattext h2, .chattext h3 { margin: 12px 0 8px; }
-  .chattext pre { max-height: none; }
-  .chattext table { margin: 8px 0; }
-  .chattext button {
-    background: #1b2233; color: var(--text); border: 1px solid #2b3a55;
-    border-radius: 6px; padding: 4px 10px; cursor: pointer;
-  }
 
   /* 트레이스 After 렌더 블록 */
   .rendered {
@@ -318,7 +313,8 @@
 
   /* ---- 채팅 프리뷰 ---- */
   /* 말풍선 없이 전체 폭 — 카드 UI 봇이 실제 채팅과 같은 레이아웃을 갖도록 */
-  .msgwrap { position: relative; z-index: 1; padding: 4px 2px 8px; }
+  /* Chat.svelte:1186-1264 — p-2 ml-4 mr-4 / flex flex-col ml-4 */
+  .msgwrap { position: relative; z-index: 1; padding: 0.5rem; margin: 0.25rem 1rem; display: flex; flex-direction: column; min-width: 0; }
   .msghead {
     display: flex; align-items: center; gap: 8px;
     margin: 0 0 10px; font-size: 12px; color: var(--muted); font-weight: 600;
@@ -330,7 +326,6 @@
     display: flex; align-items: center; justify-content: center;
     font-weight: 700; font-size: 12px; color: #9fd7ff;
   }
-  .chattext { min-width: 0; }
   .empty-hint { color: var(--muted); font-size: 12.5px; padding: 10px; text-align: center; }
 </style>
 </head>
@@ -395,9 +390,9 @@
         </select>
       </div>
       <div class="field">
-        <label>마크다운 렌더 <span class="hint">markdown-it 근사</span></label>
+        <label>마크다운 렌더 <span class="hint">ParseMarkdown 'normal' / 'back'</span></label>
         <select id="markdown">
-          <option value="1" selected>켜기 (html:true)</option>
+          <option value="1" selected>켜기 (markdown-it 14)</option>
           <option value="0">끄기 (원문 그대로)</option>
         </select>
       </div>
@@ -520,8 +515,16 @@
     </div>
 
     <div class="field">
-      <label>직전 메시지 <span class="hint">@@repeat_back 용</span></label>
-      <textarea id="prevMessage" class="mono" rows="2"></textarea>
+      <label>메시지 위치 <span class="hint">chatID · {{chatindex}} · @@inject / @@repeat_back</span></label>
+      <select id="msgPos">
+        <option value="greet" selected>첫 메시지 (인사말 · chatID -1)</option>
+        <option value="new">새 메시지 (이전 채팅 뒤 · chatID = 길이)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>이전 채팅 <span class="hint">chat.message · 인사말은 넣지 않음</span></label>
+      <textarea id="prevMessage" class="mono" rows="3" spellcheck="false" placeholder='[{"role":"user","data":"안녕"},{"role":"char","data":"..."}]  또는 그냥 텍스트(봇 메시지 1개)'></textarea>
+      <div class="err-box" id="prevMessageErr"></div>
     </div>
 
     <div class="toolbar">
@@ -540,9 +543,10 @@
           Lua 훅 4종(wasmoon), 트리거 VM, 동적 에셋(임베딩)</li>
         <li><b>1:1 이식 (파일)</b>: <code>.risup</code>(rpack→zlib→msgpack→AES-GCM),
           <code>.charx</code>/<code>.module</code>(ZIP + <code>module.risum</code>), <code>.risum</code>, PNG <code>tEXt</code> 카드</li>
-        <li><b>근사</b>: CBS 함수는 서브셋(미지원은 화면에 표시), 새니타이저는 DOMPurify 대체 구현,
-          CSS 파서는 <code>@adobe/css-tools</code> 대체, 마크다운은 markdown-it 근사,
-          에셋은 이미지 바이트 대신 자리표시자</li>
+        <li><b>원본 그대로 번들</b>: CBS 함수 레지스트리(<code>cbs.ts</code>), markdown-it 14, DOMPurify 3,
+          <code>@adobe/css-tools</code>, postcss-selector-parser, highlight.js, KaTeX, 채팅 CSS(Tailwind + typography + styles.css).
+          표시 전 CBS 사전 패스(<code>rmVar</code>) · 저장 뒤 <code>runVar</code> 패스 포함</li>
+        <li><b>근사</b>: 바이트가 없는 에셋은 자리표시자, 표시 캐시·스트리밍 없음</li>
         <li><b>미탑재</b>: 플러그인(CJS), 실제 LLM 호출, 로어북 발동</li>
       </ul>
     </div>
@@ -571,13 +575,18 @@
     <div class="pane active" id="pane-trace"></div>
     <div class="pane" id="pane-preview">
       <div id="previewWrap">
-        <div id="bgLayer" class="chattext"></div>
+        <div class="risu-scope">
+        <!-- BackgroundDom.svelte: .chattext 밖의 absolute 레이어 -->
+        <div id="bgLayer"></div>
         <div class="msgwrap">
           <div class="msghead" id="msgHead">
             <span class="avatar" id="chatAvatar">R</span>
             <span id="chatName">Risu</span>
           </div>
-          <div class="chattext" id="preview"></div>
+          <!-- Chat.svelte:540 메시지 본문 컨테이너 그대로 -->
+          <span class="text chat-width chattext prose prose-invert minw-0" id="preview"
+                style="font-size:0.875rem;line-height:1.25rem"></span>
+        </div>
         </div>
       </div>
       <pre id="htmlOut" class="htmlview"></pre>
@@ -610,6 +619,8 @@
 </main>
 
 <script src="importer.js"></script>
+<script src="vendor/risu-core.js"></script>
+<script src="cbs.js"></script>
 <script src="simulator.js"></script>
 <script src="lua-runtime.js"></script>
 <script src="asset-runtime.js"></script>
@@ -780,6 +791,71 @@
     }
   }
 
+  var lastCfg = null;
+
+  /** 이전 채팅: JSON 배열 [{role, data}] 또는 일반 텍스트(봇 메시지 1개) */
+  function readChatHistory() {
+    var t = $('prevMessage').value;
+    var err = $('prevMessageErr');
+    err.classList.remove('show');
+    if (!t.trim()) return [];
+    if (/^\s*\[/.test(t)) {
+      try {
+        var arr = JSON.parse(t);
+        if (Array.isArray(arr)) {
+          return arr
+            .filter(function (m) { return m && typeof m === 'object'; })
+            .map(function (m) { return { role: m.role === 'user' ? 'user' : 'char', data: String(m.data != null ? m.data : m.content != null ? m.content : '') }; });
+        }
+      } catch (e) {
+        err.textContent = 'JSON 오류 — 텍스트 1개로 취급: ' + e.message;
+        err.classList.add('show');
+      }
+    }
+    return [{ role: 'char', data: t }];
+  }
+
+  /** textarea 가 불러온 값 그대로면 원래 triggerscript 순서를 돌려준다 */
+  function originalTriggerOrder(cfg) {
+    var c = findEntry('character', selected.character);
+    var mods = store.module.filter(function (m) { return !!moduleChecked[m.id]; });
+    var charOk = c && applied.character === c.id &&
+      sameJson(cfg.charTriggers, c.triggers) && sameJson(cfg.charLua, c.luaTriggers);
+    var modOk = sameJson(cfg.moduleTriggers, flat(mods, 'triggers')) && sameJson(cfg.moduleLua, flat(mods, 'luaTriggers'));
+    if (!charOk && !(store.character.length === 0 && !cfg.charTriggers.length && !cfg.charLua.length)) return null;
+    if (!modOk) return null;
+    return {
+      char: charOk ? c.triggerscript || c.triggers.concat(c.luaTriggers) : [],
+      module: flat(mods, 'triggerscript')
+    };
+  }
+
+  /**
+   * 에셋 설정 — 원본 구조 (char.additionalAssets / emotionImages / module.assets)
+   * 불러온 카드에 목록이 있으면 그것을, 없으면 '에셋 이름 목록' 칸을 쓴다.
+   */
+  function buildAssetCfg() {
+    var a = readAssetConfig();
+    a.srcOf = assetSrcOf;
+    a.charIcon = assetSrcOf('main') || '';
+    var c = findEntry('character', selected.character);
+    var list = c && applied.character === c.id ? c.assetList || [] : [];
+    if (list.length) {
+      a.additional = [];
+      a.emotions = [];
+      list.forEach(function (x) {
+        if (x.type === 'emotion') a.emotions.push([x.name, refOf(x.rec)]);
+        else a.additional.push([x.name, refOf(x.rec), x.ext]);
+      });
+    }
+    a.module = [];
+    store.module.forEach(function (m) {
+      if (!moduleChecked[m.id]) return;
+      (m.assetList || []).forEach(function (x) { a.module.push([x.name, refOf(x.rec), x.ext]); });
+    });
+    return a;
+  }
+
   // 레이어 라벨을 붙이기 위해 원본 배열을 그대로 넘기고, 엔진은 객체 참조로 구분
   async function run() {
     var preset = readJson($('presetRegex'), $('presetRegexErr'), []);
@@ -820,6 +896,13 @@
     var manual = pendingManual;
     pendingManual = null;
 
+    var chatHist = readChatHistory();
+    var mode = $('mode').value;
+    var chatID = $('msgPos').value === 'new' ? chatHist.length : -1;
+    var curCharE = findEntry('character', selected.character);
+    var curPresetE = findEntry('preset', selected.preset);
+    var useCharE = curCharE && applied.character === curCharE.id ? curCharE : null;
+
     var cfg = {
       mode: $('mode').value,
       markdown: $('markdown').value === '1',
@@ -832,7 +915,17 @@
       manualTrigger: manual,
       triggersEnabled: $('featTriggers').checked,
       luaEnabled: $('featLua').checked,
-      prevMessage: $('prevMessage').value,
+      chat: chatHist,
+      chatID: chatID,
+      role: mode === 'editinput' ? 'user' : 'char',
+      firstMessage: useCharE ? useCharE.character.firstMessage || '' : $('input').value,
+      character: useCharE
+        ? { alternateGreetings: useCharE.character.alternateGreetings || [], nickname: useCharE.character.nickname || '',
+            desc: useCharE.character.description || '', personality: useCharE.character.personality || '',
+            scenario: useCharE.character.scenario || '', exampleMessage: useCharE.character.exampleMessage || '' }
+        : {},
+      defaultVariables: useCharE ? useCharE.defaultVariables || '' : '',
+      templateDefaultVariables: curPresetE && applied.preset === curPresetE.id ? curPresetE.templateDefaultVariables || '' : '',
       presetRegex: presetM,
       charRegex: charM,
       moduleRegex: modM,
@@ -840,8 +933,15 @@
       moduleLua: Array.isArray(moduleLua) ? moduleLua : [],
       charTriggers: Array.isArray(charTriggers) ? charTriggers : [],
       moduleTriggers: Array.isArray(moduleTriggers) ? moduleTriggers : [],
-      assets: Object.assign(readAssetConfig(), { srcOf: assetSrcOf })
+      assets: buildAssetCfg()
     };
+    // 불러온 트리거를 고치지 않았으면 원래 순서(일반·Lua 섞인 triggerscript)로 실행한다
+    var origOrder = originalTriggerOrder(cfg);
+    if (origOrder) {
+      cfg.charTriggerscript = origOrder.char;
+      cfg.moduleTriggerscript = origOrder.module;
+    }
+    lastCfg = cfg;
 
     var result;
     try {
@@ -858,7 +958,7 @@
     live.chat = result.chatAfter || null;
 
     renderTrace(result, cfg);
-    renderPreview(result);
+    renderPreview(result, cfg);
     renderStats(result);
     renderVarEditor();
   }
@@ -938,14 +1038,14 @@
         // dynamicAssets(enabled) 는 임베딩 퍼지 매칭 기능이고,
         // {{asset::}} 태그 해석은 카드에 에셋이 있으면 항상 일어난다 (parseAdditionalAssets).
         expandCbs: $('traceCbs').checked,
-        assets: (cfg.assets && cfg.assets.assetNames) || [],
-        srcOf: cfg.assets && cfg.assets.srcOf,
-        maxDifference: cfg.assets && cfg.assets.maxDifference,
+        assets: cfg.assets,
         charName: cfg.charName,
         userName: cfg.userName,
         vars: cfg.vars,
         globalVars: cfg.globalVars,
-        prevMessage: cfg.prevMessage
+        defaultVariables: cfg.defaultVariables,
+        templateDefaultVariables: cfg.templateDefaultVariables,
+        chat: cfg.chat
       });
     } catch (e) {
       return '<div class="rendered-note">After 렌더 오류: ' + esc(e.message) + '</div>' + raw;
@@ -1168,38 +1268,38 @@
 
   // 카드 배경: character.backgroundHTML + 모듈 backgroundEmbedding
   //   RisuAI BackgroundDom.svelte: ParseMarkdown(risuChatParser(bg + '\n' + moduleBg), char, 'back')
-  //   'back' 모드라 마크다운은 건너뛰고 CSS 스코프/살균만 한다.
-  function renderBackground() {
+  //   'back' 모드라 마크다운은 건너뛰지만 Lua editDisplay · display 트리거 · editdisplay 정규식은 탄다.
+  //   배경 div 는 .chattext 밖이라, 배경에 넣은 <style> 은 메시지(.chattext) 쪽에 적용된다.
+  var bgSeq = 0;
+  async function renderBackground(cfg) {
     var layer = $('bgLayer');
     var parts = [];
     var ch = findEntry('character', selected.character);
     if (ch && ch.character && ch.character.backgroundHTML) parts.push(ch.character.backgroundHTML);
+    var modBg = [];
     store.module.forEach(function (m) {
-      if (moduleChecked[m.id] && m.backgroundEmbedding) parts.push(m.backgroundEmbedding);
+      if (moduleChecked[m.id] && m.backgroundEmbedding) modBg.push(m.backgroundEmbedding);
     });
-    if (!parts.length) {
+    if (!parts.length && !modBg.length) {
       layer.innerHTML = '';
+      bgInfo = { html: '', css: '', source: '' };
+      renderBgTab();
       return;
     }
-    var cfg = {
-      markdown: false,
-      expandCbs: true,
-      scope: '.chattext',
-      assets: (readAssetConfig() || {}).assetNames || [],
-      srcOf: assetSrcOf,
-      charName: $('charName').value,
-      userName: $('userName').value,
-      vars: live.vars,
-      globalVars: live.globalVars,
-      prevMessage: $('prevMessage').value
-    };
+    var source = parts.join('') + '\n' + modBg.join('\n');
+    var seq = ++bgSeq;
     try {
-      var r = window.RisuSim.renderDisplay(parts.join('\n'), cfg);
+      var bcfg = Object.assign({}, cfg || lastCfg || {}, {
+        vars: live.vars, globalVars: live.globalVars, scriptstate: live.scriptstate, manualTrigger: null
+      });
+      var r = await window.RisuSim.renderBackground(source, bcfg);
+      if (seq !== bgSeq) return;
       layer.innerHTML = r.html;
-      bgInfo = { html: r.html, css: r.css || '', source: parts.join('\n') };
+      bgInfo = { html: r.html, css: r.css || '', source: source };
     } catch (e) {
+      if (seq !== bgSeq) return;
       layer.innerHTML = '';
-      bgInfo = { html: '', css: '', source: parts.join('\n'), error: String((e && e.message) || e) };
+      bgInfo = { html: '', css: '', source: source, error: String((e && e.message) || e) };
       console.error(e);
     }
     renderBgTab();
@@ -1232,14 +1332,14 @@
         : '<span class="badge ok">에셋 해석 완료</span>');
   }
 
-  function renderPreview(result) {
+  function renderPreview(result, cfg) {
     var host = $('preview');
 
     // 채팅 말풍선: 입력 단계면 유저, 그 외에는 봇 발화로 보여준다
     var isUser = $('mode').value === 'editinput';
     var who = isUser ? ($('userName').value || 'User') : ($('charName').value || 'Char');
     $('msgHead').className = 'msghead' + ($('featHead').checked ? '' : ' hide');
-    renderBackground();
+    renderBackground(cfg);
 
     var av = $('chatAvatar');
     var iconUrl = isUser ? null : assetSrcOf('main');
@@ -1401,30 +1501,49 @@
     return arr;
   }
 
+  var recUrl = typeof Map !== 'undefined' ? new Map() : null;
+  var recRef = typeof Map !== 'undefined' ? new Map() : null;
+  var refSeq = 0;
+
+  function urlOfRec(a) {
+    if (!a) return null;
+    if (a.url) return a.url; // data: / https: 는 이미 URL 이다
+    if (recUrl.has(a)) return recUrl.get(a);
+    var buf = a.bytes || (a.b64 ? b64ToBytes(a.b64) : null);
+    if (!buf) return null;
+    try {
+      var url = URL.createObjectURL(new Blob([buf], { type: a.mime || 'application/octet-stream' }));
+      recUrl.set(a, url);
+      assetUrlList.push(url);
+      return url;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** 에셋 레코드 → 경로 문자열 (원본의 additionalAssets[i][1] 자리). assetUrls 에 등록 */
+  function refOf(rec) {
+    if (!rec) return '';
+    if (!recRef.has(rec)) recRef.set(rec, 'sim-asset:' + ++refSeq);
+    var ref = recRef.get(rec);
+    if (!assetUrls[ref]) {
+      var u = urlOfRec(rec);
+      if (u) assetUrls[ref] = u;
+    }
+    return ref;
+  }
+
   function buildAssetUrls(entries) {
     revokeAssetUrls();
-    var seen = [];
+    recUrl = new Map();
+    recRef = new Map();
     entries.forEach(function (entry) {
       var data = entry && entry.assetsData;
       if (!data) return;
       Object.keys(data).forEach(function (k) {
-        var a = data[k];
-        if (!a || seen.indexOf(a) >= 0) return;
-        seen.push(a);
-        // data: / https: 는 이미 URL 이다
-        if (a.url) {
-          assetUrls[k] = a.url;
-          return;
-        }
-        var buf = a.bytes || (a.b64 ? b64ToBytes(a.b64) : null);
-        if (!buf) return;
-        try {
-          var url = URL.createObjectURL(new Blob([buf], { type: a.mime || 'application/octet-stream' }));
-          assetUrls[k] = url;
-          assetUrlList.push(url);
-        } catch (e) {
-          /* ignore */
-        }
+        // 이름·경로 별칭이 같은 레코드를 가리키면 URL 하나를 같이 쓴다
+        var u = urlOfRec(data[k]);
+        if (u && !assetUrls[k]) assetUrls[k] = u;
       });
     });
   }
@@ -1553,9 +1672,7 @@
       var p = findEntry('preset', selected.preset);
       setJson($('presetRegex'), $('presetRegexErr'), p ? p.regex : []);
       applied.preset = p ? p.id : null;
-      if (p && p.vars && Object.keys(p.vars).length && !store.character.length) {
-        setJson($('vars'), $('varsErr'), p.vars);
-      }
+      // templateDefaultVariables 도 기본값으로만 쓴다 (cfg.templateDefaultVariables)
     }
 
     // 봇 카드
@@ -1583,7 +1700,8 @@
           names.push(k);
         });
         if (names.length) $('assetNames').value = names.join('\n');
-        if (c.vars && Object.keys(c.vars).length) setJson($('vars'), $('varsErr'), c.vars);
+        // defaultVariables 는 채팅 변수(scriptstate)가 아니라 기본값이다 — cfg.defaultVariables 로 넘긴다
+        setJson($('vars'), $('varsErr'), {});
       }
       applied.character = c ? c.id : null;
     }
@@ -2028,6 +2146,7 @@
     $('userName').value = DEMO.userName;
     $('input').value = DEMO.input;
     $('prevMessage').value = DEMO.prevMessage;
+    $('msgPos').value = 'greet';
     setJson($('presetRegex'), $('presetRegexErr'), DEMO.presetRegex);
     setJson($('charRegex'), $('charRegexErr'), DEMO.charRegex);
     setJson($('moduleRegex'), $('moduleRegexErr'), DEMO.moduleRegex);

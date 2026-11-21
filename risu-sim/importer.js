@@ -788,6 +788,7 @@
         if (path && this.map[String(path).toLocaleLowerCase()] == null) {
           this.map[String(path).toLocaleLowerCase()] = rec;
         }
+        return rec;
       },
       /** data: / https: 처럼 이미 URL 인 것 */
       addUrl: function (name, url, path) {
@@ -795,7 +796,16 @@
         if (!key || !url) return;
         var rec = { url: url, mime: mimeOf(path || name), path: path || '', icon: false };
         if (this.map[key] == null) this.map[key] = rec;
-      }
+        return rec;
+      },
+      /**
+       * 원본 구조의 에셋 목록 (RisuAI characterCards.ts:940-955 의 분류)
+       *   x-risu-asset → char.additionalAssets [이름, 경로, 확장자]
+       *   emotion      → char.emotionImages   [이름, 경로]
+       *   module       → module.assets        [이름, 경로, 확장자]
+       * rec 는 실제 바이트/URL (같은 이름이 여러 개여도 각각 따로 있다)
+       */
+      list: []
     };
   }
 
@@ -803,19 +813,19 @@
   function assetPairs(cardData) {
     var out = [];
     var seen = {};
-    function push(name, uri, type) {
+    function push(name, uri, type, ext, v3) {
       if (!name || !uri) return;
       var k = String(name).toLocaleLowerCase() + '|' + uri;
       if (seen[k]) return;
       seen[k] = 1;
-      out.push({ name: String(name), uri: String(uri), type: type || '' });
+      out.push({ name: String(name), uri: String(uri), type: type || '', ext: ext == null ? 'unknown' : String(ext), v3: !!v3 });
     }
 
     if (cardData && Array.isArray(cardData.assets)) {
       for (var i = 0; i < cardData.assets.length; i++) {
         var a = cardData.assets[i];
         if (!a || typeof a !== 'object') continue;
-        push(a.name, a.uri, a.type);
+        push(a.name, a.uri, a.type, a.ext, true);
       }
     }
     if (cardData && cardData.extensions && cardData.extensions.risuai) {
@@ -824,8 +834,8 @@
         for (var j = 0; j < r.additionalAssets.length; j++) {
           var aa = r.additionalAssets[j];
           if (!aa) continue;
-          if (Array.isArray(aa)) push(aa[0], aa[1], 'x-risu-asset');
-          else if (typeof aa === 'object') push(aa.name, aa.uri || aa.data, 'x-risu-asset');
+          if (Array.isArray(aa)) push(aa[0], aa[1], 'x-risu-asset', aa[2]);
+          else if (typeof aa === 'object') push(aa.name, aa.uri || aa.data, 'x-risu-asset', aa.ext);
         }
       }
       if (Array.isArray(r.emotions)) {
@@ -848,12 +858,14 @@
 
     // data: (base64) → 그대로 URL 로
     if (/^data:/i.test(uri)) {
-      bag.addUrl(pair.name, uri, pair.name);
+      pair.rec = bag.addUrl(pair.name, uri, pair.name);
       return Promise.resolve();
     }
     // 원격 URL → 그대로 (브라우저가 로드)
+    // DIFF 주의: 원본 V3 가져오기(characterCards.ts:936)는 http(s) uri 를 건너뛴다 → 목록에 넣지 않는다
     if (/^https?:\/\//i.test(uri)) {
-      bag.addUrl(pair.name, uri, pair.name);
+      var r0 = bag.addUrl(pair.name, uri, pair.name);
+      if (!pair.v3) pair.rec = r0;
       return Promise.resolve();
     }
     // CHARX 내장 파일
@@ -865,7 +877,7 @@
       return ctx.zip
         .read(entry)
         .then(function (bytes) {
-          bag.addBytes(pair.name, bytes, path);
+          pair.rec = bag.addBytes(pair.name, bytes, path);
         })
         .catch(function () {
           bag.skipped++;
@@ -877,7 +889,7 @@
       var b64 = ctx.pngChunks ? ctx.pngChunks['chara-ext-asset_:' + key] || ctx.pngChunks['chara-ext-asset_' + key] : null;
       if (typeof b64 === 'string' && b64) {
         try {
-          bag.addBytes(pair.name, b64ToBytes(b64.trim()), pair.name);
+          pair.rec = bag.addBytes(pair.name, b64ToBytes(b64.trim()), pair.name);
         } catch (e) {
           bag.skipped++;
         }
@@ -900,6 +912,9 @@
         if (pair.type === 'icon') {
           var rec = ctx.bag.map[String(pair.name).toLocaleLowerCase()];
           if (rec) rec.icon = true;
+        }
+        if (pair.rec && (pair.type === 'x-risu-asset' || pair.type === 'emotion')) {
+          ctx.bag.list.push({ name: pair.name, type: pair.type, ext: pair.ext, rec: pair.rec });
         }
         return next();
       });
@@ -942,13 +957,16 @@
   }
 
   /** 모듈 .risum 안의 내장 자산 (encodeRPack(compressSync(image))) */
-  function fillFromRisumAssets(module, rawAssets, bag) {
+  function fillFromRisumAssets(module, rawAssets, bag, listType) {
     var names = [];
+    var exts = [];
     if (module && Array.isArray(module.assets)) {
       for (var i = 0; i < module.assets.length; i++) {
         var a = module.assets[i];
-        if (Array.isArray(a) && a[0]) names.push(String(a[0]));
-        else if (a && typeof a === 'object' && a.name) names.push(String(a.name));
+        // 인덱스를 rawAssets 와 맞춘다 (이름 없는 항목도 자리를 차지)
+        if (Array.isArray(a)) { names.push(a[0] ? String(a[0]) : ''); exts.push(a[2]); }
+        else if (a && typeof a === 'object') { names.push(a.name ? String(a.name) : ''); exts.push(a.ext); }
+        else { names.push(''); exts.push(undefined); }
       }
     }
     for (var k = 0; k < rawAssets.length; k++) {
@@ -958,7 +976,8 @@
       var decoded = rawAssets[k];
       if (!decoded || !decoded.length) continue;
       // exportModuleLegacy 는 encodeRPack(compressSync(image)) 로 쓴다
-      bag.addBytes(name, decoded, name);
+      var rec = bag.addBytes(name, decoded, name);
+      if (rec && listType !== 'none') bag.list.push({ name: name, type: listType || 'module', ext: exts[k] == null ? extOf(name) || 'unknown' : String(exts[k]), rec: rec });
     }
     return bag.map;
   }
@@ -1341,6 +1360,7 @@
       luaTriggers: [],
       lorebook: [],
       assets: [],
+      templateDefaultVariables: typeof preset.templateDefaultVariables === 'string' ? preset.templateDefaultVariables : '',
       vars: vars,
       preset: preset,
       warnings: warnings
@@ -1448,6 +1468,7 @@
       regex: regex,
       triggers: split.triggers,
       luaTriggers: split.luaTriggers,
+      triggerscript: Array.isArray(module.trigger) ? module.trigger.filter(function (t) { return t && typeof t === 'object'; }) : [],
       lorebook: Array.isArray(module.lorebook) ? module.lorebook : [],
       assets: assetNamesOf(module.assets),
       vars: {},
@@ -1548,7 +1569,8 @@
       // importCharacterProcess: module.risum 이 있으면 트리거/정규식/로어를 그것으로 덮어쓴다
       if (inner && inner.module) {
         var md = inner.module;
-        if (Array.isArray(md.trigger)) normalized.triggers = md.trigger;
+        // 원본: md.trigger ?? [] — 모듈에 트리거가 없으면 카드 트리거도 비운다
+        normalized.triggers = Array.isArray(md.trigger) ? md.trigger : [];
         if (Array.isArray(md.regex)) normalized.customScripts = md.regex;
         if (Array.isArray(md.lorebook) && md.lorebook.length) {
           normalized.lorebookOverride = md.lorebook;
@@ -1569,7 +1591,8 @@
           return fillFromZip(zip, bag);
         })
         .then(function () {
-          if (inner && inner.module) fillFromRisumAssets(inner.module, inner.rawAssets || [], bag);
+          // card.json 에 에셋 목록이 있으면 그게 원본의 additionalAssets 다 (module.risum 쪽은 목록에 안 넣음)
+          if (inner && inner.module) fillFromRisumAssets(inner.module, inner.rawAssets || [], bag, bag.list.length ? 'none' : 'x-risu-asset');
           if (bag.skipped) {
             warnings.push(
               '에셋 ' + bag.skipped + '개를 건너뛰었습니다 (파일 16MB / 전체 128MB / 800개 제한)'
@@ -1582,6 +1605,7 @@
           var asMod = characterToModule(normalized);
           var modEntry = normalizeModule(asMod, { format: 'charx', warnings: warnings });
           modEntry.assetsData = assetsData;
+          modEntry.assetList = bag.list;
           return modEntry;
         }
         var charEntry0 = normalizeCharacter(normalized, {
@@ -1591,6 +1615,7 @@
           lorebookOverride: normalized.lorebookOverride || null
         });
         charEntry0.assetsData = assetsData;
+        charEntry0.assetList = bag.list;
         return charEntry0;
       });
     });
@@ -1618,14 +1643,12 @@
         });
     }
     if (!n.firstMessage) {
-      if (n.alternateGreetings.length) {
-        // first_mes 가 비어 있고 대체 인사만 있는 카드가 있다.
-        // 시뮬레이터는 메시지 1건이 필요하므로 대체 인사 1번을 쓴다 (명시).
-        n.firstMessage = n.alternateGreetings[0];
-        warnings.push('first_mes 가 비어 있어 alternate_greetings[0] 을 입력으로 사용합니다');
-      } else {
-        warnings.push('퍼스트 메시지가 비어 있습니다');
-      }
+      // 원본은 빈 first_mes 를 그대로 둔다 (fmIndex -1 = 빈 인사말). 대체 인사로 바꾸지 않는다.
+      warnings.push(
+        n.alternateGreetings.length
+          ? 'first_mes 가 비어 있습니다 (대체 인사 ' + n.alternateGreetings.length + '개 — 입력란에 직접 붙여 넣어 확인하세요)'
+          : '퍼스트 메시지가 비어 있습니다'
+      );
     }
 
     var vars = parseDefaultVariables(n.defaultVariables, warnings);
@@ -1644,9 +1667,13 @@
       regex: n.customScripts,
       triggers: split.triggers,
       luaTriggers: split.luaTriggers,
+      // 원래 순서 (일반·Lua 섞인 char.triggerscript 그대로) — 실행 순서는 이것을 따른다
+      triggerscript: Array.isArray(n.triggers) ? n.triggers.filter(function (t) { return t && typeof t === 'object'; }) : [],
       lorebook: lore,
       assets: assets,
       vars: vars,
+      // 원본 char.defaultVariables 원문 — getvar 의 기본값(scriptstate 에 없을 때만)
+      defaultVariables: typeof n.defaultVariables === 'string' ? n.defaultVariables : '',
       toggles: typeof n.toggles === 'string' ? n.toggles : '',
       character: {
         name: n.name,
@@ -1689,6 +1716,7 @@
           bag.addBytes('main', bytes, 'card.png');
         }
         entry.assetsData = bag.map;
+        entry.assetList = bag.list;
         return entry;
       });
     });
@@ -1826,6 +1854,7 @@
         var risumBag = newAssetBag([]);
         fillFromRisumAssets(r.module, r.rawAssets || [], risumBag);
         risumEntry.assetsData = risumBag.map;
+        risumEntry.assetList = risumBag.list;
         return finish(risumEntry);
       }
 
@@ -1837,6 +1866,7 @@
           var rrBag = newAssetBag([]);
           fillFromRisumAssets(rr.module, rr.rawAssets || [], rrBag);
           rrEntry.assetsData = rrBag.map;
+          rrEntry.assetList = rrBag.list;
           return finish(rrEntry);
         }
         return parseCharx(bytes, { asModule: true });

@@ -271,7 +271,15 @@
     nogInput.dispatchEvent(new w.Event('change', { bubbles: true }));
     await until(function () { return !/읽는 중/.test(d.getElementById('importMsg').textContent); }, 8000);
     await sleep(300);
-    eq('대체 인사 1번이 입력으로', d.getElementById('input').value, '*첫 번째 대체 인사*');
+    // 원본은 빈 first_mes 를 대체 인사로 바꾸지 않는다
+    eq('빈 first_mes 는 빈 입력', d.getElementById('input').value, '');
+
+    // 원본과 같은 메시지 컨테이너 / 배경 레이어 위치
+    var pv = d.getElementById('preview');
+    eq('본문 컨테이너 클래스 (Chat.svelte:540)', pv.className, 'text chat-width chattext prose prose-invert minw-0');
+    ok('배경 레이어는 .chattext 밖', !d.getElementById('bgLayer').closest('.chattext'));
+    ok('RisuAI 채팅 CSS 로드 (FontColorStandard)', w.getComputedStyle(d.querySelector('.risu-scope')).getPropertyValue('--FontColorStandard').trim() === '#fafafa');
+    ok('vendor 번들 로드', !!(w.RisuCore && w.RisuCore.markdownit && w.RisuCBS));
     ok('경고 배지 표시', d.querySelectorAll('#list-character .ib-item .warn').length > 0);
 
     // ---------- HTML 카드 UI: 중첩 #when + 실제 이미지 ----------
@@ -412,6 +420,36 @@
     eq('모듈 제거', items('module'), beforeRemove - 1);
     ok('남은 모듈 정규식도 줄어듬', json('moduleRegex').length < beforeRegex,
       beforeRegex + ' -> ' + json('moduleRegex').length);
+
+    // ---------- 실제 Lua (wasmoon) — 원본 래퍼/브리지 의미 ----------
+    var lua = function (code) { return { comment: 'lua', type: 'manual', conditions: [], effect: [{ type: 'triggerlua', code: code }] }; };
+    var r1 = await w.RisuSim.run({
+      mode: 'editdisplay', input: 'X', markdown: false,
+      charLua: [lua("listenEdit('editDisplay', function(id, v, meta) return v .. '|' .. getChatVar(id, 'nope') .. '|' .. getChatVar(id, 'hp') .. '|' .. tostring(meta.index) end)")],
+      vars: { hp: '7' }
+    });
+    eq('Lua getChatVar 없는 키 → "null", 같은 저장소, meta.index = chatID', r1.finalText, 'X|null|7|-1');
+    var r2 = await w.RisuSim.run({
+      mode: 'editoutput', input: 'A', markdown: false,
+      // callListenMain 자체가 async 코루틴이라 안에서 :await() 를 쓸 수 있다 (원본 래퍼)
+      charLua: [lua("listenEdit('editOutput', function(id, v) setChatVar(id, 'k', 'v1') return async(function() return v .. '!' end)():await() end)")]
+    });
+    eq('Lua async(...) + :await() 동작', r2.finalText, 'A!');
+    eq('Lua setChatVar → scriptstate', r2.scriptstateAfter['$k'], 'v1');
+    var r3 = await w.RisuSim.run({
+      mode: 'editdisplay', input: 'Q', markdown: false,
+      charLua: [lua("listenEdit('editDisplay', function(id, v) return v .. 'Z' end) this is a syntax error")]
+    });
+    eq('Lua 로드 오류 → 원본처럼 훅 전체 취소', r3.finalText, 'Q');
+    var r4 = await w.RisuSim.run({
+      mode: 'editdisplay', input: 'C', markdown: false,
+      charLua: [lua("counter = (counter or 0) + 1  listenEdit('editDisplay', function(id, v) return v .. counter end)")]
+    });
+    var r5 = await w.RisuSim.run({
+      mode: 'editdisplay', input: 'C', markdown: false,
+      charLua: [lua("counter = (counter or 0) + 1  listenEdit('editDisplay', function(id, v) return v .. counter end)")]
+    });
+    eq('같은 코드면 mode 엔진 재사용 (전역 유지 X — 코드 재실행 안 함)', r4.finalText + ',' + r5.finalText, 'C1,C1');
   }
 })();
 </script>

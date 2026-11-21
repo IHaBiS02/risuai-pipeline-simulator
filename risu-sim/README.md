@@ -6,22 +6,28 @@ RisuAI(`kwaroran/Risuai` @ `6db4b681`)의 **텍스트 변환 파이프라인**�
 ```
 risu-sim/
 ├── index.html          UI (파일 불러오기 · 설정 · 트레이스 · 렌더 프리뷰)
-├── simulator.js        엔진 (CBS · 정규식 · CSS 스코프 · 새니타이저 · 표시 렌더)
+├── simulator.js        엔진 (정규식 · 자산 · ParseMarkdown · CSS 스코프 · 진입점 run())
+├── cbs.js              CBS 파서 (risuChatParser 줄 단위 이식 + 원본 cbs.ts 함수 레지스트리)
 ├── importer.js         파일 로더 (.risup · .charx · .module · .risum · .png · .json)
 ├── lua-runtime.js      Lua 레이어 (wasmoon, listenEdit 4종)
 ├── asset-runtime.js    동적 에셋 (OpenAI 호환 /embeddings)
 ├── trigger-runtime.js  트리거 VM (조건 / indent 인터프리터 / 35 effect)
 ├── ADDING-RUNTIMES.md  트리거·플러그인·동적 에셋 설계
-├── test.js             단위 테스트 129개 (node test.js)
+├── test.js             단위 테스트 134개 (node test.js)
 ├── tools/
 │   ├── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
 │   ├── make-fixtures.js    테스트용 실제 포맷 파일 생성기 (msgpackr + fflate)
 │   ├── fixtures/           위 스크립트로 만든 .risup / .charx / .module …
-│   ├── ui-test.html        브라우저 UI 통합 테스트 65개 (iframe 안에서 실제 클릭)
+│   ├── build-vendor.mjs    vendor/risu-core.js 생성 (원본 cbs.ts + 원본과 같은 버전 라이브러리)
+│   ├── build-css.mjs       vendor/risu-chat.css 생성 (원본 styles.css → Tailwind 컴파일)
+│   ├── ui-test.html        브라우저 UI 통합 테스트 113개 (iframe 안에서 실제 클릭, 실제 Lua)
 │   └── shot.html           스크린샷 촬영용 페이지
 ├── vendor/
 │   ├── wasmoon/        Lua 5.4 WASM 런타임 (index.js + glue.wasm)
-│   └── lua/json.lua    RisuAI 가 쓰는 json 라이브러리
+│   ├── lua/json.lua    RisuAI 가 쓰는 json 라이브러리
+│   ├── risu-core.js    원본 cbs.ts·calcString + markdown-it·DOMPurify·css-tools·postcss-selector-parser·hljs·KaTeX (생성물)
+│   ├── risu-chat.css   원본 채팅 CSS (preflight·prose·FontColor·.chattext 규칙, .risu-scope 로 격리) (생성물)
+│   └── atom-one-dark.min.css  코드 블록 색 (원본과 동일)
 ├── shot-cardui.png     HTML 카드 UI 봇 렌더 (실제 이미지 모드)
 ├── shot-htmlmode.png   같은 결과를 HTML 코드 모드로
 ├── shot-toggles.png    모듈 토글 + 변수 편집기
@@ -112,13 +118,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-104개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+113개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (104 checks)</pre>
+# → <pre id="out">ALL PASS (113 checks)</pre>
 ```
 
 ## 보기 모드 — 실제 이미지 / HTML 코드
@@ -272,7 +278,19 @@ after  [RENDER · CBS]
 
 ```bash
 cd risu-sim && node test.js
-# → 129 passed, 0 failed
+# → 134 passed, 0 failed
+```
+
+### vendor 파일 다시 만들기
+
+`vendor/risu-core.js` 와 `vendor/risu-chat.css` 는 원본 소스에서 생성한 파일입니다(직접 고치지 않음).
+RisuAI 를 새 버전으로 맞출 때만 다시 만듭니다. RisuAI 저장소와 그 `node_modules`(`pnpm i` 한 것)가 필요합니다.
+
+```bash
+npm i esbuild@0.25.10                                  # 아무 데나
+ESBUILD=<경로>/node_modules/esbuild/lib/main.js \
+  node tools/build-vendor.mjs ../Risuai <RisuAI>/node_modules
+node tools/build-css.mjs ../Risuai <RisuAI>/node_modules
 ```
 
 ## 트리거
@@ -344,19 +362,27 @@ python3 tools/mock-embeddings.py 8899
 | `editprocess` 에 Lua 없음 | **1:1** (생략 표시) | `scriptings.ts:1489-1491` |
 | **Lua `listenEdit` 4종** (`editInput`/`editOutput`/`editDisplay`/`editRequest`) | **1:1** | `scriptings.ts:1478-1519` |
 | **Lua 트리거 순회** (봇 → 모듈, `effect[0]==='triggerlua'` 만) | **1:1** | `scriptings.ts:1496-1512` |
-| **Lua 엔진 재생성 시 리스너 초기화** | **1:1** (코드별 캐시) | `scriptings.ts:85-98` |
+| **Lua 엔진** — mode 별 1개, 코드가 바뀌면 새로 생성 | **1:1** | `scriptings.ts:84-98, 1271` |
+| **Lua 래퍼** (`luaCodeWrapper` — `async`/`Promise`/`:await()` 포함) | **1:1** (원문 그대로) | `scriptings.ts:1302` |
+| **Lua 변수** — `getChatVar` 는 CBS·트리거와 같은 `scriptstate`, 없으면 `'null'` | **1:1** | `scriptings.ts:111-131` |
+| **Lua 오류** — 코드 로드 실패면 훅 전체 취소, 실행 오류면 그 트리거만 무시 | **1:1** | `scriptings.ts:1494-1516` |
 | **Lua 게이팅** (`editDisplay` 에서 `setChat`/`alert`/`stopChat` 무시) | **1:1** | `scriptings.ts:1102-1111` |
-| Lua `async()`/`:await()` 기반 API (`LLM`, `request`, `similarity`) | **미지원** | 브리지가 동기 |
+| Lua 네트워크 API (`LLM`, `request`, `similarity`, 이미지) | **미지원** | 실제 API 호출 없음 |
 | `encodeStyle` (`<style>` → `<risu-style>hex`) | **1:1** | `parser.svelte.ts:957-962` |
 | CSS 스코프 (`.chattext ` 프리픽스 + 클래스 `x-risu-`) | **1:1** | `parser.svelte.ts:964-997` |
 | `@import data:` 무력화, `@media`/`@supports`/`@container` 재귀 | **1:1** | `parser.svelte.ts:986-995` |
 | 클래스 개명 (`class` 속성 → `x-risu-`) | **1:1** | `parser.svelte.ts:88-101` |
 | `<iframe>` YouTube embed 만 허용 | **1:1** | `parser.svelte.ts:46-52` |
 | `href` http(s) 만 + `target=_blank`, `rel` 강제 | **1:1** | `parser.svelte.ts:102-113` |
-| CBS 함수 | **서브셋** | 아래 표 참고 |
-| DOMPurify | **대체 구현** (allowlist 워커) | `parser.svelte.ts:783-786` |
-| CSS 파서 | **대체 구현** (`@adobe/css-tools` 대신 내장) | — |
-| 마크다운 | **근사** (markdown-it 대신 최소 구현) | — |
+| CBS 파서 (`risuChatParser` — 블록·`{{/}}`·trimLines·`:else` 규칙) | **1:1** (원본 테스트 59개 통과) | `parser.svelte.ts:1096-1873` |
+| CBS 함수 242개 | **원본 그대로 번들** (`cbs.ts`) | — |
+| **표시 전 CBS 사전 패스** (`rmVar`·`visualize`) — `setvar` 는 지우기만 | **1:1** | `Chat.svelte:256` |
+| **저장 뒤 `runVar` 패스** — `setvar`/`addvar` 실제 실행 | **1:1** | `index.svelte.ts:144, 1761` |
+| DOMPurify (설정·훅) | **원본 그대로** (3.4.17) | `parser.svelte.ts:46-123, 783-856` |
+| CSS 파서 | **원본 그대로** (`@adobe/css-tools` 4.4.4 + postcss-selector-parser) | `parser.svelte.ts:964-1029` |
+| 마크다운 | **원본 그대로** (markdown-it 14.3.3, 원본 옵션·인용부호 `<mark risu-mark>`, hljs, KaTeX) | `parser.svelte.ts:24-44, 156-410` |
+| 채팅 CSS (`text chat-width chattext prose`, Tailwind preflight·typography, FontColor 변수) | **원본 그대로** (컴파일 결과) | `Chat.svelte:540`, `styles.css` |
+| 배경 레이어 (`.chattext` 밖, `'back'` 모드로 Lua·display 트리거·정규식 통과) | **1:1** | `BackgroundDom.svelte` |
 | **트리거** — `runTrigger` 5곳, `effect[0]=triggerlua` 타입 우회, display/request allowlist, 재귀 10 | **1:1** | `triggers.ts:1058` |
 | **트리거 effect** — safeSubset 35개 + display/request 상태 5개 | **1:1** | `triggers.ts:975-1036` |
 | **트리거** — `runLLM`/`imgGen`/`command`/로어북 CRUD/alert | **스텁** (배지 표시) | — |
@@ -367,23 +393,28 @@ python3 tools/mock-embeddings.py 8899
 | **Lua 트리거 분리** (`effect[0]==='triggerlua'` → Lua 단계) | **1:1** | `scriptings.ts:1496-1512` |
 | 플러그인(CJS) | **미탑재** (설계: [`ADDING-RUNTIMES.md`](ADDING-RUNTIMES.md) §5) | — |
 
-### 지원하는 CBS
+### CBS
 
-블록: `#if`, `#if_pure`, `#when`, `#when_pure`, `#pure`, `#puredisplay`, `#code`, `#escape`, `#each`, `{{:else}}`
+CBS 함수는 원본 `src/ts/cbs.ts` 를 **수정 없이 번들**해 씁니다(242개). 파서(`cbs.js`)는
+`risuChatParser` 를 줄 단위로 옮긴 것이고, 원본 테스트(`src/ts/parser/tests/cbs/*.test.ts`)를 그대로 통과합니다.
+원본 문법 규칙이 그대로 적용됩니다:
 
-인라인: `getvar`, `setvar`, `addvar`, `setdefaultvar`, `getglobalvar`, `setglobalvar`,
-`char`, `user`, `persona`, `role`, `original`, `mainprompt`, `jb`, `globalnote`,
-`blank`, `newline`, `space`, `br`, `comment`, `//`, `data`,
-`img`, `image`, `emotion`, `video`, `audio`, `bg`, `raw`, `path`, `source`, `inlay`,
-`button`, `ruby`, `tex`, `codeblock`, `debo`, `debc`, `deabo`, `deabc`, `dec`, `;`
+- `#if` 에는 `{{:else}}` 가 없습니다(글자로 남음). `{{:else}}` 는 `#when` / `#each` 등에서만.
+- `{{/}}` 는 어떤 블록이든 닫습니다. 블록 안 앞뒤 공백 줄은 `trimLines` 로 정리됩니다.
+- `{{setvar}}`/`{{addvar}}` 는 **`runVar` 패스에서만** 실행됩니다. 표시할 때는 지워지기만 하고,
+  `editoutput` 에서는 저장 뒤 `runCurrentChatFunction` 에서 실행됩니다(트레이스 ⑦ 단계).
+- `{{getvar}}` 는 없는 변수면 `null` 을 돌려줍니다(카드 `defaultVariables` 가 있으면 그 값).
 
-`#when` 연산자: `and`, `or`, `is`, `isnot`, `>`, `<`, `>=`, `<=`, `not`, `var`, `vis`, `visnot`, `toggle`, `tis`, `tisnot`
+시뮬레이터에 상태가 없는 함수(로어북, 이미지 생성 등)는 원본 코드가 빈 값을 돌려주며, 화면 하단에 목록으로 알려줍니다.
 
-`#when` 의 피연산자는 **먼저 전개한 뒤** `::` 로 나눕니다. 원본은 문자 단위 스캐너라
-바깥 태그가 닫히기 전에 안쪽 `{{...}}` 이 이미 전개되어 있기 때문입니다.
-`{{#when::{{getvar::x}}::is::y}}` 처럼 변수를 조건에 쓰는 카드가 이 경로를 씁니다.
+### 원본과 같은지 확인하는 방법
 
-미지원 태그는 **원문 그대로 남기고** 화면 하단에 목록으로 알려줍니다.
+| 검증 | 내용 |
+|---|---|
+| 원본 테스트 | `parser/tests/cbs/*` 59개 + `trimMarkdownStyle` 11개 + `assetSrcSanitize` 2개 → 이식본에 그대로 실행 |
+| 차등 퍼징 | 무작위 CBS·마크다운 4000개를 **원본 `risuChatParser`/`ParseMarkdown`** 과 이식본에 넣어 출력·변수 비교 → 차이 0 |
+| `node test.js` | 134개 |
+| `tools/ui-test.html` | 113개 (실제 Lua 포함) |
 
 ### 원본과 의도적으로 다른 부분
 
@@ -391,10 +422,10 @@ python3 tools/mock-embeddings.py 8899
 |---|---|---|
 | 플러그인(CJS) | 생략 | iframe 샌드박스 호스트 필요 (설계: [`ADDING-RUNTIMES.md`](ADDING-RUNTIMES.md) §5) |
 | `@@emo` | 감정 이미지 상태를 저장하지 않고 표시만 | 캐릭터 상태 저장소 없음 |
-| `@@inject` | 채팅 메시지에 쓰지 않고 본문에서만 제거 | 채팅 DB 없음 |
-| `@@repeat_back` | "직전 메시지" 입력 1건만 참조 | 채팅 히스토리 없음 |
+| `@@inject` / `@@repeat_back` | 원본처럼 `chatID !== -1` 일 때만 — '이전 채팅' 칸과 '메시지 위치'로 재현 | — |
 | 로어북 발동 | 미구현 (불러와서 개수만 표시) | 스캔·토큰 계산 필요 |
-| 에셋 이미지 | charx 안의 이미지만 사용 (원격 URL·data URL 은 자리표시자) | 네트워크/저장소 없음 |
+| 에셋 이미지 | 바이트가 없는 에셋만 자리표시자. V3 `x-risu-asset`→additionalAssets, `emotion`→emotionImages 로 원본처럼 분류 | 저장소 없음 |
+| `<Thoughts>` 문구 | 한국어(`생각의 사슬`) 기본, `RisuSim.setLanguage('en')` 로 변경 | 언어 설정 |
 | 캐시(`processScriptCache`) | 미구현 | 결과에 영향 없음 |
 | `#when` 내부 CBS | 원본과 동일하게 **false 여도 실행** | `parser.svelte.ts:1737-1760` |
 | `#if` 내부 CBS | 원본과 동일하게 **false 면 미실행** | `parser.svelte.ts:1214-1224` |

@@ -1,9 +1,11 @@
 const fs = require('fs');
 const vm = require('vm');
 const src = fs.readFileSync('simulator.js', 'utf8');
-const sandbox = { window: {}, console, TextEncoder, TextDecoder, Set, Map, Array, Object, String, JSON, RegExp, parseInt, parseFloat, Uint8Array };
+const sandbox = { window: {}, console, Intl, Date, Math, Number, Boolean, Error, TypeError, Promise, Proxy, Reflect, Symbol, Int16Array, Int32Array, Uint32Array, Float64Array, encodeURIComponent, decodeURIComponent, isNaN, isFinite, setTimeout, clearTimeout, TextEncoder, TextDecoder, Set, Map, Array, Object, String, JSON, RegExp, parseInt, parseFloat, Uint8Array };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('vendor/risu-core.js', 'utf8'), sandbox);
+vm.runInContext(fs.readFileSync('cbs.js', 'utf8'), sandbox);
 vm.runInContext(src, sandbox);
 vm.runInContext(fs.readFileSync('trigger-runtime.js', 'utf8'), sandbox);
 const sim = sandbox.window.RisuSim;
@@ -83,8 +85,11 @@ console.log('\n[5] CBS 기본');
   eq('getvar', r.finalText, 'Risu!');
 }
 {
+  // 원본: editoutput 의 CBS 는 runVar 없이 돈다 → setvar 는 글자로 남고 getvar 는 'null'.
+  // 저장 뒤 runCurrentChatFunction(runVar:true) 에서 setvar 가 실행되고 지워진다 (index.svelte.ts:1761).
   const r = await sim.run({ mode: 'editoutput', input: '{{setvar::a::1}}{{getvar::a}}' });
-  eq('setvar→getvar', r.finalText, '1');
+  eq('setvar 는 runVar 패스에서만 실행 → 본문은 null', r.finalText, 'null');
+  eq('setvar 결과는 변수에 반영', r.varsAfter.a, '1');
 }
 {
   const r = await sim.run({
@@ -108,7 +113,8 @@ console.log('\n[5] CBS 기본');
     input: '{{#if {{getvar::f}}}}Y{{:else}}N{{/if}}',
     vars: { f: '1' },
   });
-  eq('#if 중첩', r.finalText, 'Y');
+  // 원본 #if 에는 {{:else}} 가 없다 (parser.svelte.ts:1213) — 글자로 남는다
+  eq('#if 중첩 (else 는 글자로 남음)', r.finalText, 'Y{{:else}}N');
 }
 
 console.log('\n[6] 정규식 out 안의 CBS 재파싱');
@@ -166,7 +172,10 @@ console.log('\n[10] 잘못된 정규식은 스킵');
 console.log('\n[11] #pure / #escape');
 {
   const r = await sim.run({ mode: 'editoutput', input: '{{#pure}}{{getvar::x}}{{/pure}}' });
-  eq('#pure 원문 유지', r.finalText, '{{getvar::x}}');
+  // editoutput 단계에서는 원문 유지, 저장 뒤 runVar 패스가 다시 파싱하므로 최종 저장값은 'null' (원본과 동일)
+  const cbsStage = r.trace.find((t) => t.stage === '④ CBS');
+  eq('#pure 원문 유지 (CBS 단계)', cbsStage.after, '{{getvar::x}}');
+  eq('#pure 는 runVar 패스에서 다시 전개됨', r.finalText, 'null');
 }
 {
   const r = await sim.run({ mode: 'editoutput', input: '{{#escape}}{a}(b){{/escape}}' });
@@ -415,10 +424,11 @@ console.log('\n[22] importer — 실제 도구가 만드는 변형들');
   eq('JPEG prefix 붙은 charx 도 읽힘', j.kind, 'character');
   eq('JPEG prefix charx 이름', j.character.name, 'FixtureBot');
 
-  // first_mes 가 비면 alternate_greetings[0] 을 쓴다
+  // first_mes 가 비어도 원본은 대체 인사로 바꾸지 않는다 (빈 인사말)
   const ng = await imp.load({ name: 'fixture-nogreeting.json', data: read('fixture-nogreeting.json') });
-  eq('대체 인사로 대체', ng.character.firstMessage, '*첫 번째 대체 인사*');
-  eq('대체했다는 경고', /alternate_greetings/.test(ng.warnings.join(' ')), true);
+  eq('빈 first_mes 는 그대로', ng.character.firstMessage, '');
+  eq('대체 인사 있다는 경고', /대체 인사 2개/.test(ng.warnings.join(' ')), true);
+  eq('대체 인사는 보존', ng.character.alternateGreetings[0], '*첫 번째 대체 인사*');
 
   // lorebook entries 에 null 이 섞여도 죽지 않는다
   const dirty = {
@@ -446,7 +456,7 @@ console.log('\n[22] importer — 실제 도구가 만드는 변형들');
 
 console.log('\n[23] CBS #when — 중첩 {{...}} 피연산자');
 {
-  const mk = (vars) => ({ vars, globalVars: {}, charName: 'B', userName: 'U', returnCSSError: true, unsupported: new Set(), chat: [] });
+  const mk = (vars) => sim._internal.makeCtx({ vars, charName: 'B', userName: 'U' });
   const p = (t, vars) => sim._internal.cbsParse(t, mk(vars || {}));
 
   eq('{{getvar}}::is::값 → 참', p('{{#when::{{getvar::r}}::is::yes}}S{{/when}}', { r: 'yes' }), 'S');
@@ -498,6 +508,8 @@ console.log('\n[24] 에셋 이미지 — charx 바이트 추출 + srcOf');
   const e = await imp.load({ name: 'fixture-cardui.charx', data: read('fixture-cardui.charx') });
   const keys = Object.keys(e.assetsData || {});
   eq('에셋 이름으로 추출됨', keys.indexOf('banner') >= 0, true);
+  eq('원본 구조 목록(additionalAssets)', (e.assetList || []).filter((a) => a.type === 'x-risu-asset').map((a) => a.name).indexOf('banner') >= 0, true);
+  eq('목록 항목에 실제 바이트', !!(e.assetList.find((a) => a.name === 'banner') || {}).rec, true);
   eq('zip 경로로도 추출됨', keys.indexOf('assets/x-risu-asset/images/banner.png') >= 0, true);
   eq('PNG MIME', e.assetsData.banner.mime, 'image/png');
   eq('PNG 시그니처', Buffer.from(e.assetsData.banner.b64, 'base64').subarray(0, 4).toString('hex'), '89504e47');
@@ -506,9 +518,9 @@ console.log('\n[24] 에셋 이미지 — charx 바이트 추출 + srcOf');
 
   const withSrc = sim._internal.resolveAssetTags('{{image::banner}}', ['banner'], 4, () => 'blob:fake-url');
   eq('image → inlay 래퍼 + 실제 img', withSrc,
-    '<div class="risu-inlay-image"><img src="blob:fake-url" alt="banner" style=""/></div>\n');
+    '<div class="risu-inlay-image"><img src="blob:fake-url" alt="blob:fake-url" style=""/></div>\n'); // 원본 alt = 경로 (parser.svelte.ts:564)
   const imgTag = sim._internal.resolveAssetTags('{{img::banner}}', ['banner'], 4, () => 'blob:fake-url');
-  eq('img → 실제 img', imgTag, '<img src="blob:fake-url" alt="banner" style=" "/>');
+  eq('img → 실제 img', imgTag, '<img src="blob:fake-url" alt="blob:fake-url" style=" "/>');
   const noSrc = sim._internal.resolveAssetTags('{{image::banner}}', ['banner'], 4, null);
   eq('srcOf 없으면 자리표시자', noSrc.indexOf('x-risu-sim-asset') >= 0, true);
   const rawTag = sim._internal.resolveAssetTags('url({{raw::banner}})', ['banner'], 4, () => 'blob:x');
@@ -538,7 +550,7 @@ console.log('\n[25] 변수 공간 통일 — getvar == scriptstate[$k]');
     input: '{{setvar::hp::9}}{{getvar::hp}}',
     charRegex: []
   });
-  eq('setvar → getvar 왕복', r2.finalText.includes('9'), true);
+  eq('setvar 는 runVar 패스에서 실행 → 같은 공간', r2.varsAfter.hp, '9');
   eq('setvar 가 scriptstate 에 기록', r2.scriptstateAfter['$hp'], '9');
 
   // 없는 변수는 원본과 같이 'null' 문자열

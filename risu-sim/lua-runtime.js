@@ -19,88 +19,9 @@
 (function () {
   'use strict';
 
-  // 원본 scriptings.ts:1302-1476 의 동기 버전.
-  // async(callback)/Promise.create/:await() 부분은 브리지가 동기라 제거했습니다.
-  var WRAPPER = [
-    "json = require 'json'",
-    '',
-    'function getChat(id, index) return json.decode(getChatMain(id, index)) end',
-    'function getFullChat(id) return json.decode(getFullChatMain(id)) end',
-    'function getRecentChats(id, count) return json.decode(getRecentChatsMain(id, count)) end',
-    'function setFullChat(id, value) setFullChatMain(id, json.encode(value)) end',
-    '',
-    'function log(value) logMain(json.encode(value)) end',
-    '',
-    'local editRequestFuncs = {}',
-    'local editDisplayFuncs = {}',
-    'local editInputFuncs = {}',
-    'local editOutputFuncs = {}',
-    '',
-    'function listenEdit(type, func)',
-    "    if type == 'editRequest' then",
-    '        editRequestFuncs[#editRequestFuncs + 1] = func',
-    '        __registerEditListener(type)',
-    '        return',
-    '    end',
-    "    if type == 'editDisplay' then",
-    '        editDisplayFuncs[#editDisplayFuncs + 1] = func',
-    '        __registerEditListener(type)',
-    '        return',
-    '    end',
-    "    if type == 'editInput' then",
-    '        editInputFuncs[#editInputFuncs + 1] = func',
-    '        __registerEditListener(type)',
-    '        return',
-    '    end',
-    "    if type == 'editOutput' then",
-    '        editOutputFuncs[#editOutputFuncs + 1] = func',
-    '        __registerEditListener(type)',
-    '        return',
-    '    end',
-    "    throw('Invalid type')",
-    'end',
-    '',
-    'function getState(id, name)',
-    '    local escapedName = "__"..name',
-    '    return json.decode(getChatVar(id, escapedName))',
-    'end',
-    '',
-    'function setState(id, name, value)',
-    '    local escapedName = "__"..name',
-    '    setChatVar(id, escapedName, json.encode(value))',
-    'end',
-    '',
-    'function setStateChanged(id, name, value)',
-    '    local escapedName = "__"..name',
-    '    return setChatVarChanged(id, escapedName, json.encode(value))',
-    'end',
-    '',
-    'function callListenMain(eventType, id, value, meta)',
-    '    local realMeta = json.decode(meta)',
-    '',
-    "    if eventType == 'editDisplay' then",
-    '        local out = value',
-    '        for _, func in ipairs(editDisplayFuncs) do',
-    '            local r = func(id, out, realMeta)',
-    "            if type(r) == 'string' then out = r end",
-    '        end',
-    '        return out',
-    '    end',
-    '',
-    '    local realValue = json.decode(value)',
-    "    if eventType == 'editRequest' then",
-    '        for _, func in ipairs(editRequestFuncs) do realValue = func(id, realValue, realMeta) end',
-    '    end',
-    "    if eventType == 'editInput' then",
-    '        for _, func in ipairs(editInputFuncs) do realValue = func(id, realValue, realMeta) end',
-    '    end',
-    "    if eventType == 'editOutput' then",
-    '        for _, func in ipairs(editOutputFuncs) do realValue = func(id, realValue, realMeta) end',
-    '    end',
-    '    return json.encode(realValue)',
-    'end',
-    ''
-  ].join('\n');
+  // 원본 scriptings.ts:1302 luaCodeWrapper — 그대로 (async / Promise.create / :await() 포함).
+  // wasmoon(injectObjects) 의 Promise 확장으로 원본과 똑같이 동작한다.
+  var WRAPPER = "\njson = require 'json'\n\nfunction getChat(id, index)\n    return json.decode(getChatMain(id, index))\nend\n\nfunction getFullChat(id)\n    return json.decode(getFullChatMain(id))\nend\n\nfunction getRecentChats(id, count)\n    return json.decode(getRecentChatsMain(id, count))\nend\n\nfunction setFullChat(id, value)\n    setFullChatMain(id, json.encode(value))\nend\n\nfunction log(value)\n    logMain(json.encode(value))\nend\n\nfunction getLoreBooks(id, search)\n    return json.decode(getLoreBooksMain(id, search))\nend\n\n\nfunction loadLoreBooks(id)\n    return json.decode(loadLoreBooksMain(id):await())\nend\n\nfunction LLM(id, prompt, useMultimodal, options)\n    useMultimodal = useMultimodal or false\n    options = options or {}\n    return json.decode(LLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())\nend\n\nfunction axLLM(id, prompt, useMultimodal, options)\n    useMultimodal = useMultimodal or false\n    options = options or {}\n    return json.decode(axLLMMain(id, json.encode(prompt), useMultimodal, json.encode(options)):await())\nend\n\nfunction getCharacterImage(id)\n    return getCharacterImageMain(id):await()\nend\n\nfunction getPersonaImage(id)\n    return getPersonaImageMain(id):await()\nend\n\nlocal editRequestFuncs = {}\nlocal editDisplayFuncs = {}\nlocal editInputFuncs = {}\nlocal editOutputFuncs = {}\n\nfunction listenEdit(type, func)\n    if type == 'editRequest' then\n        editRequestFuncs[#editRequestFuncs + 1] = func\n        __registerEditListener(type)\n        return\n    end\n\n    if type == 'editDisplay' then\n        editDisplayFuncs[#editDisplayFuncs + 1] = func\n        __registerEditListener(type)\n        return\n    end\n\n    if type == 'editInput' then\n        editInputFuncs[#editInputFuncs + 1] = func\n        __registerEditListener(type)\n        return\n    end\n\n    if type == 'editOutput' then\n        editOutputFuncs[#editOutputFuncs + 1] = func\n        __registerEditListener(type)\n        return\n    end\n\n    throw('Invalid type')\nend\n\nfunction getState(id, name)\n    local escapedName = \"__\"..name\n    return json.decode(getChatVar(id, escapedName))\nend\n\nfunction setState(id, name, value)\n    local escapedName = \"__\"..name\n    setChatVar(id, escapedName, json.encode(value))\nend\n\nfunction setStateChanged(id, name, value)\n    local escapedName = \"__\"..name\n    return setChatVarChanged(id, escapedName, json.encode(value))\nend\n\nfunction async(callback)\n    return function(...)\n        local co = coroutine.create(callback)\n        local safe, result = coroutine.resume(co, ...)\n\n        return Promise.create(function(resolve, reject)\n            local checkresult\n            local step = function()\n                if coroutine.status(co) == \"dead\" then\n                    local send = safe and resolve or reject\n                    return send(result)\n                end\n\n                safe, result = coroutine.resume(co)\n                checkresult()\n            end\n\n            checkresult = function()\n                if safe and result == Promise.resolve(result) then\n                    result:finally(step)\n                else\n                    step()\n                end\n            end\n\n            checkresult()\n        end)\n    end\nend\n\ncallListenMain = async(function(eventType, id, value, meta)\n    local realValue = value\n    local realMeta = json.decode(meta)\n\n    if eventType == 'editDisplay' then\n        local realValue = value\n        for _, func in ipairs(editDisplayFuncs) do\n            local output = func(id, realValue, realMeta)\n            local outputType = type(output)\n            if outputType == 'string' then\n                realValue = output\n            else\n                print('Error: Lua editDisplay must return a string, received ' .. outputType)\n            end\n        end\n        return realValue\n    end\n\n    realValue = json.decode(value)\n\n    if eventType == 'editRequest' then\n        for _, func in ipairs(editRequestFuncs) do\n            realValue = func(id, realValue, realMeta)\n        end\n    end\n\n    if eventType == 'editInput' then\n        for _, func in ipairs(editInputFuncs) do\n            realValue = func(id, realValue, realMeta)\n        end\n    end\n\n    if eventType == 'editOutput' then\n        for _, func in ipairs(editOutputFuncs) do\n            realValue = func(id, realValue, realMeta)\n        end\n    end\n\n    return json.encode(realValue)\nend)\n\n";
 
   // 현재 실행 컨텍스트 (엔진은 코드별로 캐시되므로 클로저로 잡으면 안 됨)
   var CURRENT = { ctx: null, safe: false, editDisplay: false, logs: [] };
@@ -169,18 +90,19 @@
     };
 
     // ---- 무게이트 ----
+    // scriptings.ts:111 — chatVar.svelte 의 getChatVar (scriptstate → defaultVariables → 'null')
+    // 트리거에서 부르면 트리거의 getVar/setVar (로컬 변수·display tempVars 포함, scriptings.ts:67-68)
     g.set('getChatVar', function (id, key) {
-      var v = ctx().vars[key];
-      return v == null ? '' : String(v);
+      if (CURRENT.vars) return CURRENT.vars.getVar(String(key));
+      return window.RisuCBS.getChatVar(ctx(), String(key));
     });
+    // scriptings.ts:128 — getGlobalChatVar (없으면 'null')
     g.set('getGlobalVar', function (id, key) {
-      var v = ctx().globalVars[key];
-      return v == null ? '' : String(v);
+      return window.RisuCBS.getGlobalChatVar(ctx(), String(key));
     });
+    // scriptings.ts:283 — risuChatParser(value, { chara })
     g.set('cbs', function (value) {
-      var internal = window.RisuSim && window.RisuSim._internal;
-      if (!internal) return String(value);
-      return internal.cbsParse(String(value), ctx());
+      return window.RisuCBS.parse(String(value), ctx(), {});
     });
     g.set('logMain', function (jsonValue) {
       CURRENT.logs.push(String(jsonValue));
@@ -196,39 +118,34 @@
     });
 
     // ---- 채팅 읽기 ----
+    // scriptings.ts:168-270 — .at(index) (음수 인덱스 허용), 없으면 null
+    function msgOut(m) {
+      return { role: m.role, data: m.data, time: m.time || 0, chatId: m.chatId };
+    }
     g.set('getChatMain', function (id, index) {
-      var c = ctx().chat || [];
-      var m = c[index];
-      if (!m) return JSON.stringify({});
-      return JSON.stringify({ role: m.role, data: m.data, content: m.data, time: m.time || 0 });
+      var m = (ctx().chat || []).at(index);
+      if (!m) return JSON.stringify(null);
+      return JSON.stringify(msgOut(m));
     });
     g.set('getFullChatMain', function () {
-      var c = ctx().chat || [];
-      return JSON.stringify(
-        c.map(function (m) {
-          return { role: m.role, data: m.data, content: m.data };
-        })
-      );
+      return JSON.stringify((ctx().chat || []).map(msgOut));
     });
     g.set('getRecentChatsMain', function (id, count) {
       var c = ctx().chat || [];
-      var n = parseInt(count, 10) || 10;
-      return JSON.stringify(
-        c.slice(-n).map(function (m) {
-          return { role: m.role, data: m.data, content: m.data };
-        })
-      );
+      var safeCount = Math.max(0, Math.floor(count || 0));
+      var start = Math.max(0, c.length - safeCount);
+      return JSON.stringify(c.slice(start).map(msgOut));
     });
     g.set('getChatLength', function () {
       return (ctx().chat || []).length;
     });
     g.set('getChatRole', function (id, index) {
-      var m = (ctx().chat || [])[index];
+      var m = (ctx().chat || []).at(index);
       return m ? m.role : '';
     });
     g.set('getChatData', function (id, index) {
-      var m = (ctx().chat || [])[index];
-      return m ? String(m.data) : '';
+      var m = (ctx().chat || []).at(index);
+      return m ? m.data : '';
     });
 
     // ---- Safe 등급 (editDisplay 에서는 무시됨) ----
@@ -239,40 +156,41 @@
     g.set('setChatVar', function (id, key, value) {
       // 원본: Safe 또는 EditDisplay 만 허용 → 편집 훅에서는 항상 허용
       if (!CURRENT.safe && !CURRENT.editDisplay) return;
-      ctx().vars[key] = String(value);
+      if (CURRENT.vars) CURRENT.vars.setVar(String(key), String(value));
+      else window.RisuCBS.setChatVar(ctx(), String(key), String(value));
     });
     g.set('setChatVarChanged', function (id, key, value) {
       if (!CURRENT.safe && !CURRENT.editDisplay) return;
-      ctx().vars[key] = String(value);
-      return true;
+      if (CURRENT.vars) {
+        if (CURRENT.vars.setVar(String(key), String(value)) === true) return true;
+        return;
+      }
+      var before = ctx().scriptstate['$' + key];
+      window.RisuCBS.setChatVar(ctx(), String(key), String(value));
+      if (before !== ctx().scriptstate['$' + key]) return true;
     });
-    g.set('setGlobalVar', function (id, key, value) {
-      if (!CURRENT.safe && !CURRENT.editDisplay) return;
-      ctx().globalVars[key] = String(value);
-    });
+    // 원본에는 setGlobalVar API 가 없다 (전역 변수는 Lua 에서 읽기 전용)
 
     g.set('stopChat', function () {
       if (!guardSafe()) return;
       CURRENT.ctx.stopSending = true;
     });
 
-    g.set('setChatMain', function (id, index, value) {
+    // scriptings.ts:197 setChat(id, index, value) — 값은 문자열 그대로, .at(index)
+    g.set('setChat', function (id, index, value) {
       if (!guardSafe()) return;
-      var c = CURRENT.ctx.chat || [];
-      try {
-        var v = JSON.parse(value);
-        if (c[index]) c[index].data = v;
-      } catch (e) {}
+      var m = (CURRENT.ctx.chat || []).at(index);
+      if (m) m.data = value == null ? '' : value;
     });
     g.set('setChatRole', function (id, index, role) {
       if (!guardSafe()) return;
-      var c = CURRENT.ctx.chat || [];
-      if (c[index]) c[index].role = String(role);
+      var m = (CURRENT.ctx.chat || []).at(index);
+      if (m) m.role = role === 'user' ? 'user' : 'char';
     });
     g.set('cutChat', function (id, start, end) {
       if (!guardSafe()) return;
-      var c = CURRENT.ctx.chat || [];
-      c.splice(start, end);
+      // scriptings.ts:222 — slice(start, end) 로 교체 (splice 아님)
+      CURRENT.ctx.chat = (CURRENT.ctx.chat || []).slice(start, end);
     });
     g.set('removeChat', function (id, index) {
       if (!guardSafe()) return;
@@ -282,12 +200,12 @@
     g.set('addChat', function (id, role, value) {
       if (!guardSafe()) return;
       var c = CURRENT.ctx.chat || [];
-      c.push({ role: String(role), data: String(value) });
+      c.push({ role: role === 'user' ? 'user' : 'char', data: value == null ? '' : value });
     });
     g.set('insertChat', function (id, index, role, value) {
       if (!guardSafe()) return;
       var c = CURRENT.ctx.chat || [];
-      c.splice(index, 0, { role: String(role), data: String(value) });
+      c.splice(index, 0, { role: role === 'user' ? 'user' : 'char', data: value == null ? '' : value });
     });
     g.set('setFullChatMain', function (id, jsonValue) {
       if (!guardSafe()) return;
@@ -316,7 +234,8 @@
     g.set('reloadChat', function () {
       if (!guardSafe()) return;
     });
-    g.set('getLoreBooks', function () {
+    // DIFF: 로어북은 시뮬레이터에 없음 — 빈 목록
+    g.set('getLoreBooksMain', function () {
       return '[]';
     });
     g.set('setBackgroundEmbedding', function () {
@@ -324,9 +243,20 @@
     });
   }
 
-  async function getEngine(code) {
-    var cached = engines.get(code);
-    if (cached) return cached;
+  // scriptings.ts:1271 getOrCreateEngineState + :84-97 — 엔진은 mode 별로 하나.
+  // 코드가 바뀌면 엔진을 닫고 새로 만든다 → 같은 mode 에 Lua 트리거가 여러 개면
+  // 매번 새 엔진이라 Lua 전역 변수가 이어지지 않는다 (원본과 동일).
+  async function getEngine(code, mode) {
+    var cached = engines.get(mode);
+    if (cached && cached.code === code) return cached;
+    if (cached) {
+      try {
+        cached.engine.global.close();
+      } catch (e) {
+        /* ignore */
+      }
+      engines.delete(mode);
+    }
     var factory = await ensureFactory();
     var engine = await factory.createEngine({ injectObjects: true, enableProxy: false });
     var editListeners = new Set();
@@ -336,7 +266,7 @@
     installBridge(engine);
     await engine.doString(WRAPPER + '\n' + code);
     var state = { engine: engine, editListeners: editListeners, code: code };
-    engines.set(code, state);
+    engines.set(mode, state);
     return state;
   }
 
@@ -351,6 +281,7 @@
    * triggers 배열을 순회하며 effect[0].type === 'triggerlua' 인 것만 실행한다.
    */
   async function runEditHooks(triggers, mode, data, ctx, meta) {
+    var content = data;
     var results = [];
     var list = Array.isArray(triggers) ? triggers : [];
 
@@ -377,47 +308,48 @@
       }
 
       CURRENT.ctx = ctx;
+      CURRENT.vars = null;
       CURRENT.safe = mode !== 'editDisplay';
       CURRENT.editDisplay = mode === 'editDisplay';
       CURRENT.logs = [];
       entry.code = String(code);
 
+      // 엔진 생성(코드 로드) 오류는 원본에서 runScripted 밖으로 던져져
+      // runLuaEditTrigger 전체가 원래 content 를 돌려준다 (scriptings.ts:1514-1516)
+      var state;
       try {
-        var state = await getEngine(String(code));
-        if (!state.editListeners.has(mode)) {
-          entry.skipped = "이 스크립트가 listenEdit('" + mode + "') 를 등록하지 않음";
-          results.push(entry);
-          continue;
-        }
-        var fn = state.engine.global.get('callListenMain');
-        if (typeof fn !== 'function') {
-          entry.skipped = 'callListenMain 없음 (래퍼 초기화 실패)';
-          results.push(entry);
-          continue;
-        }
-
-        var payload = mode === 'editDisplay' ? String(data) : JSON.stringify(data);
-        var res = await fn(mode, nextKey(), payload, JSON.stringify(meta || {}));
-
-        var before = data;
-        if (mode === 'editDisplay') {
-          if (typeof res === 'string') data = res;
-        } else {
-          try {
-            data = JSON.parse(res);
-          } catch (e) {
-            entry.error = 'callListenMain 반환값 JSON 파싱 실패';
-          }
-        }
-        entry.before = before;
-        entry.after = data;
-        entry.changed = before !== data;
-        entry.logs = CURRENT.logs.slice();
-        results.push(entry);
+        state = await getEngine(String(code), mode);
       } catch (e) {
-        entry.error = String((e && e.message) || e);
+        entry.error = String((e && e.message) || e) + ' — 원본도 이 훅 전체를 취소하고 원래 텍스트를 씀';
         results.push(entry);
+        return { data: content, results: results, aborted: true };
       }
+      if (!state.editListeners.has(mode)) {
+        entry.skipped = "이 스크립트가 listenEdit('" + mode + "') 를 등록하지 않음";
+        results.push(entry);
+        continue;
+      }
+      var before = data;
+      var res;
+      try {
+        var fn = state.engine.global.get('callListenMain');
+        if (fn) {
+          var directString = mode === 'editDisplay';
+          var payload = directString ? data : JSON.stringify(data);
+          res = await fn(mode, nextKey(), payload, JSON.stringify(meta || {}));
+          if (!directString) res = JSON.parse(res);
+        }
+      } catch (e) {
+        // 원본: console.error 후 res 는 undefined → data 유지
+        entry.error = String((e && e.message) || e);
+        res = undefined;
+      }
+      data = res == null ? data : res; // runResult.res ?? data
+      entry.before = before;
+      entry.after = data;
+      entry.changed = before !== data;
+      entry.logs = CURRENT.logs.slice();
+      results.push(entry);
     }
 
     return { data: data, results: results };
@@ -430,7 +362,7 @@
    *   output → onOutput(id)
    *   manual → 전역 함수 <manualName>(id)
    */
-  async function runTriggerScript(code, mode, manualName, ctx, lowLevelAccess) {
+  async function runTriggerScript(code, mode, manualName, ctx, lowLevelAccess, vars) {
     if (!code || !String(code).trim()) return { skipped: 'code 가 비어 있음' };
 
     var fnName =
@@ -449,10 +381,11 @@
     CURRENT.safe = true;
     CURRENT.editDisplay = false;
     CURRENT.logs = [];
+    CURRENT.vars = vars || null;
 
     var state;
     try {
-      state = await getEngine(String(code));
+      state = await getEngine(String(code), mode === 'manual' ? manualName : mode);
     } catch (e) {
       return { fn: fnName, error: String((e && e.message) || e) };
     }

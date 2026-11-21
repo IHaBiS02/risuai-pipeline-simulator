@@ -129,7 +129,9 @@
     var triggers = charTriggers.concat(moduleTriggers); // triggers.ts:1081-1084
 
     var scriptstate = ctx.scriptstate || (ctx.scriptstate = {});
-    var defaultVariables = opts.defaultVariables || [];
+    // triggers.ts:1086 parseKeyValue(char.defaultVariables).concat(parseKeyValue(db.templateDefaultVariables))
+    var defaultVariables = opts.defaultVariables ||
+      window.RisuCBS.parseKeyValue(ctx.defaultVariables || '').concat(window.RisuCBS.parseKeyValue(ctx.templateDefaultVariables || ''));
     var logs = [];        // console.log 대체
     var trace = [];       // 트리거별 실행 기록
     var chat = opts.chat || ctx.chat || [];
@@ -143,10 +145,10 @@
     var currentIndent = 0;
     var recursion = opts.recursiveCount || 0;
 
+    // risuChatParser(x, { chara: char }) — 같은 변수 저장소(ctx.scriptstate)를 본다
     function cbs(str) {
-      var internal = window.RisuSim && window.RisuSim._internal;
-      if (!internal || str == null) return str == null ? '' : String(str);
-      return internal.cbsParse(String(str), ctx);
+      if (str == null) return '';
+      return window.RisuCBS.parse(String(str), ctx, {});
     }
 
     function getLocalVar(key) {
@@ -789,13 +791,17 @@
                 detail = 'Lua 런타임 없음';
                 break;
               }
+              // triggers.ts:1560 — runScripted(code, { mode, setVar, getVar, chat }) → chat = result.chat
+              ctx.chat = chat;
               var luaRes = await window.RisuLua.runTriggerScript(
                 String(effect.code || ''),
                 mode === 'manual' ? 'manual' : mode,
                 entry.manualName || '',
                 ctx,
-                !!trigger.lowLevelAccess
+                !!trigger.lowLevelAccess,
+                { getVar: getVar, setVar: setVar }
               );
+              chat = ctx.chat;
               if (luaRes && luaRes.stopSending) stopSending = true;
               if (luaRes && luaRes.logs && luaRes.logs.length) logs.push.apply(logs, luaRes.logs);
               detail = 'triggerlua' + (luaRes && luaRes.fn ? ' (' + luaRes.fn + ')' : '') + (luaRes && luaRes.skipped ? ' — ' + luaRes.skipped : '');
