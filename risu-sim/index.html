@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RisuAI 파이프라인 시뮬레이터</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #121722;
+    --panel2: #181f2e;
+    --line: #263043;
+    --text: #d6deeb;
+    --muted: #7c8aa5;
+    --accent: #5cc8ff;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+      "Malgun Gothic", "Noto Sans KR", sans-serif;
+  }
+  header {
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #101623, #0b0e14);
+  }
+  header h1 { margin: 0 0 4px; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); font-size: 12.5px; }
+  header code { color: var(--accent); }
+
+  main {
+    display: grid;
+    grid-template-columns: minmax(380px, 42%) 1fr;
+    gap: 0;
+    height: calc(100vh - 74px);
+  }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; height: auto; }
+  }
+
+  .col { overflow: auto; padding: 16px; }
+  .col.left { border-right: 1px solid var(--line); background: #0d1119; }
+
+  .field { margin-bottom: 14px; }
+  .field > label {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 5px;
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .field > label span.hint { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+
+  textarea, select, input[type="text"], input[type="password"] {
+    width: 100%;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    resize: vertical;
+    outline: none;
+  }
+  textarea:focus, select:focus, input[type="text"]:focus, input[type="password"]:focus { border-color: #3a5277; }
+  .chk-row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); cursor: pointer; }
+  .chk input[type="checkbox"] { accent-color: #3a5277; }
+  button.mini {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 10px; cursor: pointer; font: inherit; font-size: 12px;
+  }
+  button.mini:hover { border-color: #3a5277; }
+  select { font-family: inherit; font-size: 13px; }
+  textarea.mono { min-height: 90px; }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; vertical-align: middle;
+  }
+  .badge.ok { background: rgba(74,222,128,.14); color: var(--ok); }
+  .badge.skip { background: rgba(124,138,165,.16); color: var(--muted); }
+  .badge.warn { background: rgba(251,191,36,.14); color: var(--warn); }
+  .badge.err { background: rgba(248,113,113,.14); color: var(--err); }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; flex-wrap: wrap; }
+  .tabs button {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--muted); padding: 7px 11px; cursor: pointer; font-size: 13px;
+    font-family: inherit; border-radius: 6px 6px 0 0;
+  }
+  .tabs button:hover { color: var(--text); background: rgba(255,255,255,.03); }
+  .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .pane { display: none; }
+  .pane.active { display: block; }
+
+  .stage {
+    border: 1px solid var(--line); border-radius: 9px; margin-bottom: 9px;
+    background: var(--panel); overflow: hidden;
+  }
+  .stage > summary {
+    cursor: pointer; padding: 9px 12px; font-weight: 600; font-size: 13px;
+    display: flex; align-items: center; gap: 8px; list-style: none;
+  }
+  .stage > summary::-webkit-details-marker { display: none; }
+  .stage > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+  .stage[open] > summary::before { content: "▾"; }
+  .stage > summary .detail { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .stage .body { padding: 0 12px 12px; }
+
+  pre {
+    background: #0a0e15; border: 1px solid var(--line); border-radius: 7px;
+    padding: 9px 11px; margin: 6px 0; overflow: auto; max-height: 320px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  pre.diff-before { border-left: 2px solid #7c8aa5; }
+  pre.diff-after { border-left: 2px solid var(--ok); }
+  .pre-label { font-size: 11px; color: var(--muted); margin-top: 8px; text-transform: uppercase; letter-spacing: .04em; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  td code { font-size: 11.5px; color: var(--accent); word-break: break-all; }
+
+  .layer-preset { color: #c084fc; }
+  .layer-char { color: #5cc8ff; }
+  .layer-module { color: #4ade80; }
+
+  /* ---- 렌더 프리뷰 ---- */
+  #previewWrap {
+    border: 1px solid var(--line); border-radius: 9px; background: #0a0e15;
+    padding: 14px; overflow: auto;
+  }
+  /* 카드 CSS 는 .chattext 하위로만 적용된다 (RisuAI 와 동일) */
+  .chattext { color: var(--text); font-size: 14px; line-height: 1.7; }
+  .chattext .sim-asset, .chattext .sim-bg { color: var(--muted); font-style: italic; }
+  .chattext p { margin: 0 0 10px; }
+  .chattext h1, .chattext h2, .chattext h3 { margin: 12px 0 8px; }
+  .chattext pre { max-height: none; }
+  .chattext table { margin: 8px 0; }
+  .chattext button {
+    background: #1b2233; color: var(--text); border: 1px solid #2b3a55;
+    border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  }
+
+  .note {
+    margin-top: 14px; padding: 11px 13px; border-radius: 8px;
+    background: rgba(251,191,36,.06); border: 1px solid rgba(251,191,36,.22);
+    color: #d9c99a; font-size: 12.5px;
+  }
+  .note b { color: var(--warn); }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+  .note li { margin: 3px 0; }
+
+  .stat { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
+  .stat b { color: var(--text); font-weight: 600; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .toolbar button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 12.5px;
+  }
+  .toolbar button:hover { border-color: #3a5277; }
+  .err-box {
+    display: none; margin: 6px 0 0; padding: 7px 10px; border-radius: 6px;
+    background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3);
+    color: #fca5a5; font: 12px/1.5 ui-monospace, monospace;
+  }
+  .err-box.show { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RisuAI 파이프라인 시뮬레이터</h1>
+  <p>
+    <code>processScriptFull()</code> · <code>encodeStyle()</code> · <code>trimMarkdown()</code> 을
+    RisuAI <code>6db4b681</code> 에서 1:1 이식 · 정적 HTML (서버/빌드 불필요)
+  </p>
+</header>
+
+<main>
+  <!-- ============================ 설정 ============================ -->
+  <div class="col left">
+    <div class="row">
+      <div class="field">
+        <label>실행 모드 <span class="hint">ScriptMode</span></label>
+        <select id="mode">
+          <option value="editdisplay" selected>editdisplay — 디스플레이 수정</option>
+          <option value="editoutput">editoutput — 출력문 수정</option>
+          <option value="editinput">editinput — 입력문 수정</option>
+          <option value="editprocess">editprocess — 리퀘스트 데이터 수정</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>마크다운 렌더 <span class="hint">markdown-it 근사</span></label>
+        <select id="markdown">
+          <option value="1" selected>켜기 (html:true)</option>
+          <option value="0">끄기 (원문 그대로)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>입력 텍스트 <span class="hint">모델 출력 / 메시지 원문</span></label>
+      <textarea id="input" class="mono" rows="5"></textarea>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>봇 이름 <span class="hint">{{char}}</span></label>
+        <input type="text" id="charName" value="Risu">
+      </div>
+      <div class="field">
+        <label>유저 이름 <span class="hint">{{user}}</span></label>
+        <input type="text" id="userName" value="User">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>봇 정규식 <span class="hint">char.customscript[]</span></label>
+      <textarea id="charRegex" class="mono" rows="6" spellcheck="false"></textarea>
+      <div class="err-box" id="charRegexErr"></div>
+    </div>
+
+    <div class="field">
+      <label>프리셋 정규식 <span class="hint">db.presetRegex[]</span></label>
+      <textarea id="presetRegex" class="mono" rows="6" spellcheck="false"></textarea>
+      <div class="err-box" id="presetRegexErr"></div>
+    </div>
+
+    <div class="field">
+      <label>모듈 정규식 <span class="hint">module.regex[] (db.modules 순)</span></label>
+      <textarea id="moduleRegex" class="mono" rows="6" spellcheck="false"></textarea>
+      <div class="err-box" id="moduleRegexErr"></div>
+    </div>
+
+    <div class="field">
+      <label>봇 Lua 트리거 <span class="hint">char.triggerscript[] · effect[0].type=triggerlua</span></label>
+      <textarea id="charLua" class="mono" rows="6" spellcheck="false"></textarea>
+      <div class="err-box" id="charLuaErr"></div>
+    </div>
+
+    <div class="field">
+      <label>모듈 Lua 트리거 <span class="hint">module.trigger[]</span></label>
+      <textarea id="moduleLua" class="mono" rows="4" spellcheck="false"></textarea>
+      <div class="err-box" id="moduleLuaErr"></div>
+    </div>
+
+    <div class="field">
+      <label>봇 트리거 <span class="hint">char.triggerscript[]</span></label>
+      <textarea id="charTriggers" class="mono" rows="6" spellcheck="false"></textarea>
+      <div class="err-box" id="charTriggersErr"></div>
+    </div>
+
+    <div class="field">
+      <label>모듈 트리거 <span class="hint">module.trigger[]</span></label>
+      <textarea id="moduleTriggers" class="mono" rows="4" spellcheck="false"></textarea>
+      <div class="err-box" id="moduleTriggersErr"></div>
+    </div>
+
+    <div class="field">
+      <label>동적 에셋 <span class="hint">db.dynamicAssets</span></label>
+      <div class="chk-row">
+        <label class="chk"><input type="checkbox" id="assetEnabled"> 사용</label>
+        <label class="chk"><input type="checkbox" id="assetDisplay"> 표시 단계에도 적용</label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>에셋 이름 목록 <span class="hint">한 줄에 하나 · char.additionalAssets</span></label>
+      <textarea id="assetNames" class="mono" rows="4" spellcheck="false" placeholder="smile_happy.png&#10;angry.png"></textarea>
+    </div>
+
+    <div class="field">
+      <label>임베딩 API <span class="hint">OpenAI 호환 /embeddings</span></label>
+      <input type="text" id="assetUrl" placeholder="https://api.openai.com/v1" spellcheck="false">
+      <input type="password" id="assetKey" placeholder="sk-..." style="margin-top:6px" spellcheck="false">
+      <input type="text" id="assetModel" placeholder="text-embedding-3-small" style="margin-top:6px" spellcheck="false">
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="assetSaveKey"> API 키도 이 브라우저에 저장</label>
+      <div class="row" style="margin-top:8px">
+        <button type="button" class="mini" id="assetTest">연결 테스트</button>
+        <button type="button" class="mini" id="assetClear">캐시 비우기</button>
+      </div>
+      <div class="err-box" id="assetMsg"></div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>채팅 변수 <span class="hint">JSON</span></label>
+        <textarea id="vars" class="mono" rows="4" spellcheck="false"></textarea>
+        <div class="err-box" id="varsErr"></div>
+      </div>
+      <div class="field">
+        <label>전역 변수 <span class="hint">toggle_* 포함</span></label>
+        <textarea id="globalVars" class="mono" rows="4" spellcheck="false"></textarea>
+        <div class="err-box" id="globalVarsErr"></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>직전 메시지 <span class="hint">@@repeat_back 용</span></label>
+      <textarea id="prevMessage" class="mono" rows="2"></textarea>
+    </div>
+
+    <div class="toolbar">
+      <button id="loadDemo">예시 불러오기</button>
+      <button id="runBtn">실행</button>
+    </div>
+
+    <div class="note">
+      <b>이 시뮬레이터가 실제로 하는 것 / 안 하는 것</b>
+      <ul>
+        <li><b>1:1 이식</b>: 정규식 3레이어 순서, <code>&lt;order N&gt;</code> 내림차순 stable 정렬,
+          <code>in/out/flag/ableFlag</code> 처리, <code>$n</code>·<code>$&amp;</code>·<code>$1</code>,
+          <code>@@emo</code>/<code>@@inject</code>/<code>@@move_*</code>/<code>@@repeat_back</code>,
+          치환 결과 재-CBS, CBS → 정규식 순서, <code>encodeStyle</code>, CSS 스코프(<code>.chattext</code> + <code>x-risu-</code>)</li>
+        <li><b>근사</b>: CBS 함수는 서브셋(미지원은 화면에 표시), 새니타이저는 DOMPurify 대체 구현,
+          CSS 파서는 <code>@adobe/css-tools</code> 대체, 마크다운은 markdown-it 근사</li>
+        <li><b>미탑재</b>: Lua(wasmoon), 트리거, 플러그인, 동적 에셋, 실제 LLM</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============================ 결과 ============================ -->
+  <div class="col right">
+    <div class="stat" id="stat"></div>
+
+    <div class="tabs">
+      <button data-pane="trace" class="active">트레이스</button>
+      <button data-pane="preview">렌더 프리뷰</button>
+      <button data-pane="css">스코프된 CSS</button>
+      <button data-pane="html">최종 HTML</button>
+      <button data-pane="vars">변수</button>
+    </div>
+
+    <div class="pane active" id="pane-trace"></div>
+    <div class="pane" id="pane-preview"><div id="previewWrap"><div class="chattext" id="preview"></div></div></div>
+    <div class="pane" id="pane-css"><pre id="cssOut"></pre></div>
+    <div class="pane" id="pane-html"><pre id="htmlOut"></pre></div>
+    <div class="pane" id="pane-vars"><pre id="varsOut"></pre></div>
+  </div>
+</main>
+
+<script src="simulator.js"></script>
+<script src="lua-runtime.js"></script>
+<script src="asset-runtime.js"></script>
+<script src="trigger-runtime.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var DEMO = {
+    mode: 'editdisplay',
+    markdown: '1',
+    charName: 'Risu',
+    userName: 'User',
+    input: '*당신을 바라보며 미소 짓는다.*\n\nHP: {{getvar::hp}}\n\n{{#when::toggle::cot}}<span class="tag">CoT ON</span>{{:else}}<span class="tag">CoT OFF</span>{{/when}}',
+    vars: { hp: '42' },
+    globalVars: { toggle_cot: '1' },
+    prevMessage: '',
+    presetRegex: [
+      {
+        comment: '프리셋: 말풍선에 배지 추가',
+        type: 'editdisplay',
+        in: '^([\\s\\S]*)$',
+        out: '<div class="badge">PRESET</div>\n$1',
+        ableFlag: true,
+        flag: 'g'
+      }
+    ],
+    charRegex: [
+      {
+        comment: '봇: 카드 CSS + 래퍼',
+        type: 'editdisplay',
+        in: '^([\\s\\S]*)$',
+        out: '<style>\n.msg{background:linear-gradient(180deg,#1b2233,#0e1420);border:1px solid #2b3a55;border-radius:12px;padding:12px}\n.msg b{color:#7fd1ff}\n.badge{display:inline-block;background:#2b3a55;color:#cfe6ff;border-radius:999px;padding:1px 8px;font-size:11px;margin-bottom:8px}\n.tag{background:#1b2233;border:1px solid #2b3a55;border-radius:6px;padding:1px 7px;font-size:12px}\n</style>\n<div class="msg">$1</div>',
+        ableFlag: true,
+        flag: 'g'
+      }
+    ],
+    moduleRegex: [
+      {
+        comment: '모듈: order 10 → 프리셋/봇보다 먼저 실행됨',
+        type: 'editdisplay',
+        in: 'HP: (\\d+)',
+        out: 'HP: <b>$1</b>',
+        ableFlag: true,
+        flag: 'g,<order 10>'
+      }
+    ],
+    charLua: [
+      {
+        comment: '봇 Lua: editDisplay 로 상태 표시 추가 (정규식보다 먼저 실행됨)',
+        type: '',
+        effect: [
+          {
+            type: 'triggerlua',
+            code: [
+              "listenEdit('editDisplay', function(id, data, meta)",
+              "  local hp = getChatVar(id, 'hp')",
+              "  return data .. '\\n\\n<span class=\"tag\">Lua: hp=' .. hp .. '</span>'",
+              'end)'
+            ].join('\n')
+          }
+        ]
+      }
+    ],
+    moduleLua: [],
+    assetNames: ['smile_happy.png', 'smile_sad.png', 'angry.png', 'sitting.png'],
+    charTriggers: [
+      {
+        comment: '표시: HP가 50 이하면 경고 문구 추가',
+        type: 'display',
+        conditions: [],
+        effect: [
+          { type: 'v2SetVar', var: 'hp', operator: '=', value: '{{getvar::hp}}', indent: 0 },
+          { type: 'v2If', source: 'hp', sourceType: 'var', condition: '<=', target: '50', targetType: 'value', indent: 0 },
+          { type: 'v2GetDisplayState', outputVar: 'raw', indent: 1 },
+          { type: 'v2ConcatString', source1: 'raw', source1Type: 'var', source2: '\n\n**[HP 낮음: {{getvar::hp}}]**', source2Type: 'value', outputVar: 'out', indent: 1 },
+          { type: 'v2SetDisplayState', valueType: 'var', value: 'out', indent: 1 },
+          { type: 'v2EndIndent', indent: 1, endOfLoop: false },
+          { type: 'v2ConsoleLog', source: 'display 트리거 실행됨', sourceType: 'value', indent: 0 }
+        ]
+      }
+    ],
+    moduleTriggers: []
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function setJson(el, errEl, val) {
+    el.value = typeof val === 'string' ? val : JSON.stringify(val, null, 2);
+    errEl.className = 'err-box';
+    errEl.textContent = '';
+  }
+
+  function readJson(el, errEl, fallback) {
+    var raw = el.value.trim();
+    if (!raw) return fallback;
+    try {
+      var v = JSON.parse(raw);
+      errEl.className = 'err-box';
+      errEl.textContent = '';
+      return v;
+    } catch (e) {
+      errEl.className = 'err-box show';
+      errEl.textContent = 'JSON 오류: ' + e.message;
+      return fallback;
+    }
+  }
+
+  function layerClass(layer) {
+    if (layer === 'preset') return 'layer-preset';
+    if (layer === 'char') return 'layer-char';
+    return 'layer-module';
+  }
+
+  function layerName(layer) {
+    if (layer === 'preset') return '프리셋';
+    if (layer === 'char') return '봇';
+    return '모듈';
+  }
+
+  function tagScripts(config) {
+    var out = {};
+    (config.presetRegex || []).forEach(function (s, i) { out[s.__k || ('p' + i)] = 1; });
+    return out;
+  }
+
+  // 레이어 라벨을 붙이기 위해 원본 배열을 그대로 넘기고, 엔진은 객체 참조로 구분
+  async function run() {
+    var preset = readJson($('presetRegex'), $('presetRegexErr'), []);
+    var char = readJson($('charRegex'), $('charRegexErr'), []);
+    var mod = readJson($('moduleRegex'), $('moduleRegexErr'), []);
+    var vars = readJson($('vars'), $('varsErr'), {});
+    var gvars = readJson($('globalVars'), $('globalVarsErr'), {});
+    var charLua = readJson($('charLua'), $('charLuaErr'), []);
+    var moduleLua = readJson($('moduleLua'), $('moduleLuaErr'), []);
+    var charTriggers = readJson($('charTriggers'), $('charTriggersErr'), []);
+    var moduleTriggers = readJson($('moduleTriggers'), $('moduleTriggersErr'), []);
+
+    // 레이어 마킹 (엔진이 순서를 바꿔도 라벨이 유지되도록 래퍼 사용)
+    function mark(arr, layer) {
+      return (Array.isArray(arr) ? arr : []).map(function (s) {
+        return Object.assign({}, s, { __layer: layer });
+      });
+    }
+    var presetM = mark(preset, 'preset');
+    var charM = mark(char, 'char');
+    var modM = mark(mod, 'module');
+
+    var cfg = {
+      mode: $('mode').value,
+      markdown: $('markdown').value === '1',
+      input: $('input').value,
+      charName: $('charName').value,
+      userName: $('userName').value,
+      vars: vars,
+      globalVars: gvars,
+      prevMessage: $('prevMessage').value,
+      presetRegex: presetM,
+      charRegex: charM,
+      moduleRegex: modM,
+      charLua: Array.isArray(charLua) ? charLua : [],
+      moduleLua: Array.isArray(moduleLua) ? moduleLua : [],
+      charTriggers: Array.isArray(charTriggers) ? charTriggers : [],
+      moduleTriggers: Array.isArray(moduleTriggers) ? moduleTriggers : [],
+      assets: readAssetConfig()
+    };
+
+    var result;
+    try {
+      result = await RisuSim.run(cfg);
+    } catch (e) {
+      $('pane-trace').innerHTML = '<pre style="color:#f87171">실행 오류: ' + String(e && e.stack || e) + '</pre>';
+      return;
+    }
+
+    renderTrace(result, cfg);
+    renderPreview(result);
+    renderStats(result);
+  }
+
+  function renderStats(result) {
+    var ran = 0, changed = 0;
+    result.trace.forEach(function (st) {
+      if (st.entries) {
+        st.entries.forEach(function (e) {
+          if (!e.skipped) ran++;
+          if (e.changed) changed++;
+        });
+      }
+    });
+    var css = result.display.css ? result.display.css.length : 0;
+    $('stat').innerHTML =
+      '<span>실행된 스크립트 <b>' + ran + '</b></span>' +
+      '<span>결과 변경 <b>' + changed + '</b></span>' +
+      '<span>스코프된 CSS <b>' + css + '</b> bytes</span>' +
+      '<span>최종 길이 <b>' + result.finalText.length + '</b></span>' +
+      (result.unsupported.length
+        ? '<span class="badge warn">미지원 CBS ' + result.unsupported.length + '</span>'
+        : '') +
+      (function () {
+        var ar = null;
+        result.trace.forEach(function (st) { if (st.assetResult) ar = st.assetResult; });
+        if (!ar) return '<span class="badge skip">동적 에셋 미탑재</span>';
+        if (ar.error) return '<span class="badge err">에셋 임베딩 실패</span>';
+        if (ar.skipped) return '<span class="badge skip">에셋 스킵</span>';
+        var changed = ar.tags.filter(function (t) { return t.chosen && t.chosen !== t.name; }).length;
+        return '<span class="badge ok">에셋 태그 ' + ar.tags.length + ' · 치환 ' + changed + '</span>';
+      })() +
+      (function () {
+        var ls = result.luaStatus || {};
+        if (ls.state === 'ready') return '<span class="badge ok">Lua WASM ready</span>';
+        if (ls.state === 'error') return '<span class="badge err">Lua 오류</span>';
+        if (ls.state === 'absent') return '<span class="badge skip">Lua 미탑재</span>';
+        return '<span class="badge skip">Lua ' + esc(ls.state || 'idle') + '</span>';
+      })();
+  }
+
+  function renderTrace(result, cfg) {
+    var host = $('pane-trace');
+    var html = '';
+
+    result.trace.forEach(function (st) {
+      var badge = st.skipped
+        ? '<span class="badge skip">생략</span>'
+        : '<span class="badge ok">실행</span>';
+      html += '<details class="stage" ' + (st.entries || st.table || st.luaResults || st.assetResult || st.triggerTrace ? 'open' : '') + '>';
+      html += '<summary>' + badge + esc(st.stage) +
+        ' <span class="detail">' + esc(st.detail || '') + '</span></summary>';
+      html += '<div class="body">';
+
+      if (st.table) {
+        // 정렬 결과 표
+        if (st.orderChanged) {
+          html += '<p style="color:#fbbf24;font-size:12px;margin:4px 0 8px">' +
+            '⚠ <code>&lt;order N&gt;</code> 이 하나라도 있어 <b>전체가 내림차순 재정렬</b>되었습니다.</p>';
+        }
+        html += '<p class="pre-label">실행 순서</p>';
+        html += '<table><thead><tr><th>#</th><th>레이어</th><th>type</th><th>order</th><th>actions</th><th>in</th><th>out</th></tr></thead><tbody>';
+        st.table.forEach(function (row) {
+          html += '<tr>' +
+            '<td>' + row.n + '</td>' +
+            '<td class="' + layerClass(row.layer) + '">' + layerName(row.layer) + '</td>' +
+            '<td><code>' + esc(row.type) + '</code></td>' +
+            '<td>' + (row.order || 0) + '</td>' +
+            '<td>' + (row.actions && row.actions.length ? '<code>' + esc(row.actions.join(', ')) + '</code>' : '—') + '</td>' +
+            '<td><code>' + esc(short(row.in)) + '</code></td>' +
+            '<td><code>' + esc(short(row.out)) + '</code></td>' +
+            '</tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      if (st.luaResults) {
+        html += '<p class="pre-label" style="margin-top:12px">Lua 트리거별 결과</p>';
+        if (!st.luaResults.length) {
+          html += '<p style="color:#7c8aa5;font-size:12px">등록된 Lua 트리거가 없습니다.</p>';
+        }
+        st.luaResults.forEach(function (r) {
+          html += '<details class="stage" style="background:#0f1420">';
+          html += '<summary>' +
+            (r.skipped
+              ? '<span class="badge skip">스킵</span>'
+              : r.error
+                ? '<span class="badge err">오류</span>'
+                : r.changed
+                  ? '<span class="badge ok">변경</span>'
+                  : '<span class="badge skip">무변경</span>') +
+            ' #' + r.n + ' ' + esc(r.comment || '(설명 없음)') +
+            ' <span class="detail">' + esc(r.mode) + '</span></summary><div class="body">';
+          if (r.skipped) html += '<p style="font-size:12px;color:#7c8aa5">' + esc(r.skipped) + '</p>';
+          if (r.error) html += '<p style="font-size:12px;color:#f87171">' + esc(r.error) + '</p>';
+          if (!r.skipped && !r.error) {
+            html += '<div class="pre-label">before</div><pre class="diff-before">' + esc(clip(r.before)) + '</pre>';
+            html += '<div class="pre-label">after</div><pre class="diff-after">' + esc(clip(r.after)) + '</pre>';
+          }
+          if (r.logs && r.logs.length) {
+            html += '<div class="pre-label">log()</div><pre>' + esc(r.logs.join('\n')) + '</pre>';
+          }
+          html += '</div></details>';
+        });
+      }
+
+      if (st.triggerTrace) {
+        html += '<p class="pre-label" style="margin-top:12px">트리거 발화 로그</p>';
+        if (!st.triggerTrace.length) {
+          html += '<p style="color:#7c8aa5;font-size:12px">등록된 트리거가 없습니다.</p>';
+        }
+        st.triggerTrace.forEach(function (t) {
+          var tb = t.error ? '<span class="badge err">오류</span>'
+            : t.skipped ? '<span class="badge skip">스킵</span>'
+            : '<span class="badge ok">발화</span>';
+          html += '<details class="stage" style="background:#0f1420">';
+          html += '<summary>' + tb + ' #' + t.n + ' ' + esc(t.comment || '(설명 없음)') +
+            ' <span class="detail">' + esc(t.type || '') +
+            (t.bypass ? ' · type 필터 우회' : '') + '</span></summary>';
+          html += '<div class="body">';
+          if (t.skipped) html += '<p style="font-size:12px;color:#7c8aa5">' + esc(t.skipped) + '</p>';
+          if (t.bypass) html += '<p style="font-size:12px;color:#fbbf24">' + esc(t.bypass) + '</p>';
+          if (t.error) html += '<pre style="color:#f87171;border-left:2px solid #f87171">' + esc(t.error) + '</pre>';
+          if (t.conditions && t.conditions.length) {
+            html += '<table><thead><tr><th>조건</th><th>값</th><th>기대</th><th>결과</th></tr></thead><tbody>';
+            t.conditions.forEach(function (c) {
+              html += '<tr><td><code>' + esc(c.type) + (c.operator ? ' ' + esc(c.operator) : '') + '</code></td>' +
+                '<td>' + esc(c.value === undefined ? '' : String(c.value)) + '</td>' +
+                '<td>' + esc(c.expect === undefined ? '' : String(c.expect)) + '</td>' +
+                '<td>' + (c.pass ? '✓' : '✗') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+          }
+          if (t.effectsRun && t.effectsRun.length) {
+            html += '<p class="pre-label">effect</p><table><tbody>';
+            t.effectsRun.forEach(function (e) {
+              html += '<tr><td style="width:34px">' + e.index + '</td>' +
+                '<td><code>' + esc(e.type) + '</code></td>' +
+                '<td>' + (e.error
+                  ? '<span style="color:#f87171">' + esc(e.error) + '</span>'
+                  : e.skipped
+                    ? '<span style="color:#7c8aa5">' + esc(e.skipped) + '</span>'
+                    : esc(e.detail || '')) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+          }
+          if (t.logs && t.logs.length) {
+            html += '<div class="pre-label">console.log</div><pre>' + esc(t.logs.join('\n')) + '</pre>';
+          }
+          html += '</div></details>';
+        });
+      }
+
+      if (st.assetResult) {
+        var ar = st.assetResult;
+        html += '<p class="pre-label" style="margin-top:12px">동적 에셋 해석</p>';
+        if (ar.error) {
+          html += '<pre style="color:#f87171;border-left:2px solid #f87171">' + esc(ar.error) + '</pre>';
+        }
+        if (ar.skipped) {
+          html += '<p style="color:#7c8aa5;font-size:12px">스킵 — ' + esc(ar.skipped) + '</p>';
+        }
+        if (!ar.error && !ar.skipped) {
+          html += '<p style="font-size:12px;color:#7c8aa5">' +
+            esc(ar.url) + ' · model=' + esc(ar.model || '(없음)') +
+            ' · 이름 임베딩 ' + (ar.cachedNames ? 'cache hit' : 'cache miss') +
+            ' · ' + (ar.latencyMs || 0) + 'ms</p>';
+          html += '<table><thead><tr><th>#</th><th>태그</th><th>타입</th><th>정확일치</th><th>후보 (cosine)</th><th>선택</th></tr></thead><tbody>';
+          ar.tags.forEach(function (t, i) {
+            var cands = (t.candidates || [])
+              .map(function (c) {
+                return esc(c.name) + ' <span style="color:#7c8aa5">' + c.score.toFixed(4) + '</span>';
+              })
+              .join('<br>');
+            html += '<tr>' +
+              '<td>' + (i + 1) + '</td>' +
+              '<td><code>' + esc(t.name) + '</code></td>' +
+              '<td>' + esc(t.type) + '</td>' +
+              '<td>' + (t.exact ? '✓' : '—') + '</td>' +
+              '<td>' + (cands || '—') + '</td>' +
+              '<td><code>' + esc(t.chosen || '없음') + '</code>' +
+              (t.fromCache ? ' <span class="badge skip">cache</span>' : '') + '</td>' +
+              '</tr>';
+          });
+          html += '</tbody></table>';
+        }
+      }
+
+      if (st.entries) {
+        html += '<p class="pre-label" style="margin-top:12px">스크립트별 결과</p>';
+        st.entries.forEach(function (e) {
+          html += '<details class="stage" style="background:#0f1420">';
+          html += '<summary>' +
+            (e.skipped
+              ? '<span class="badge skip">스킵</span>'
+              : e.error
+                ? '<span class="badge err">오류</span>'
+                : e.changed
+                  ? '<span class="badge ok">변경</span>'
+                  : '<span class="badge skip">무변경</span>') +
+            ' #' + e.n + ' <span class="' + layerClass(e.layer) + '">' + layerName(e.layer) + '</span>' +
+            ' <span class="detail">' + esc(short(e.in, 40)) + ' → ' + esc(short(e.out, 40)) + '</span>' +
+            '</summary><div class="body">';
+
+          html += '<table style="margin-bottom:8px"><tbody>';
+          html += '<tr><th style="width:90px">flag</th><td><code>' + esc(e.flag || '') + '</code></td></tr>';
+          html += '<tr><th>order</th><td>' + (e.order || 0) + '</td></tr>';
+          if (e.actions && e.actions.length) html += '<tr><th>actions</th><td><code>' + esc(e.actions) + '</code></td></tr>';
+          if (e.resolvedIn && e.resolvedIn !== e.in) html += '<tr><th>in (CBS 후)</th><td><code>' + esc(e.resolvedIn) + '</code></td></tr>';
+          if (e.action) html += '<tr><th>동작</th><td><code>' + esc(e.action) + '</code></td></tr>';
+          if (e.emotion) html += '<tr><th>감정</th><td><code>' + esc(e.emotion) + '</code></td></tr>';
+          if (e.skipped) html += '<tr><th>사유</th><td>' + esc(e.skipped) + '</td></tr>';
+          if (e.error) html += '<tr><th>오류</th><td style="color:#f87171">' + esc(e.error) + '</td></tr>';
+          html += '</tbody></table>';
+
+          if (!e.skipped) {
+            html += '<div class="pre-label">before</div><pre class="diff-before">' + esc(clip(e.before)) + '</pre>';
+            html += '<div class="pre-label">after</div><pre class="diff-after">' + esc(clip(e.after)) + '</pre>';
+          }
+          html += '</div></details>';
+        });
+      } else if (!st.table) {
+        html += '<div class="pre-label">before</div><pre class="diff-before">' + esc(clip(st.before)) + '</pre>';
+        html += '<div class="pre-label">after</div><pre class="diff-after">' + esc(clip(st.after)) + '</pre>';
+      }
+
+      html += '</div></details>';
+    });
+
+    if (result.unsupported.length) {
+      html += '<div class="note"><b>미지원 CBS</b><br>' +
+        result.unsupported.map(esc).join(', ') +
+        '<br><span style="opacity:.8">이 태그들은 원문 그대로 남았습니다. RisuAI 본체에서는 정상 동작합니다.</span></div>';
+    }
+
+    if (cfg.mode === 'editdisplay') {
+      html += '<details class="stage"><summary><span class="badge ok">표시</span> ' +
+        '<span class="detail">encodeStyle → markdown → DOMPurify → CSS 스코프</span></summary>' +
+        '<div class="body"><div class="pre-label">encodeStyle 후 (hex)</div>' +
+        '<pre>' + esc(clip(result.display.encoded)) + '</pre>' +
+        '<div class="pre-label">마크다운 렌더 후</div>' +
+        '<pre>' + esc(clip(result.display.markdown)) + '</pre>' +
+        '</div></details>';
+    }
+
+    host.innerHTML = html;
+  }
+
+  function renderPreview(result) {
+    var host = $('preview');
+    host.innerHTML = result.display.html;
+
+    // 카드 CSS(<style>)는 전역이지만 셀렉터가 .chattext 하위로 스코프되어 있다.
+    // 미리보기 밖으로 새지 않는지 눈으로 확인할 수 있게 그대로 삽입한다.
+    $('cssOut').textContent = result.display.css || '(스코프된 CSS 없음)';
+    $('htmlOut').textContent = result.display.html;
+    $('varsOut').textContent =
+      '// 채팅 변수 (실행 후)\n' + JSON.stringify(result.varsAfter, null, 2) +
+      '\n\n// 전역 변수 (실행 후)\n' + JSON.stringify(result.globalVarsAfter, null, 2) +
+      '\n\n// 트리거 scriptstate (chat.scriptstate)\n' + JSON.stringify(result.scriptstateAfter || {}, null, 2) +
+      '\n\n// 채팅 메시지 (chat.message)\n' + JSON.stringify(result.chatAfter || [], null, 2);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+  function short(s, n) {
+    s = String(s == null ? '' : s).replace(/\s+/g, ' ');
+    n = n || 48;
+    return s.length > n ? s.slice(0, n) + '…' : s;
+  }
+  function clip(s) {
+    s = String(s == null ? '' : s);
+    return s.length > 6000 ? s.slice(0, 6000) + '\n… (이하 생략)' : s;
+  }
+
+  // ---- 동적 에셋 설정 ----
+  var ASSET_LS_KEY = 'risusim.assets.v1';
+
+  function readAssetConfig() {
+    return {
+      enabled: $('assetEnabled').checked,
+      applyToDisplay: $('assetDisplay').checked,
+      url: $('assetUrl').value.trim(),
+      key: $('assetKey').value.trim(),
+      model: $('assetModel').value.trim(),
+      assetNames: $('assetNames').value
+        .split('\n')
+        .map(function (v) { return v.trim(); })
+        .filter(Boolean)
+    };
+  }
+
+  function saveAssetSettings() {
+    try {
+      var d = {
+        enabled: $('assetEnabled').checked,
+        applyToDisplay: $('assetDisplay').checked,
+        url: $('assetUrl').value,
+        model: $('assetModel').value,
+        names: $('assetNames').value,
+        saveKey: $('assetSaveKey').checked
+      };
+      if (d.saveKey) d.key = $('assetKey').value;
+      localStorage.setItem(ASSET_LS_KEY, JSON.stringify(d));
+    } catch (e) {
+      /* file:// 등 localStorage 가 막힌 환경은 무시 */
+    }
+  }
+
+  function loadAssetSettings() {
+    try {
+      var raw = localStorage.getItem(ASSET_LS_KEY);
+      if (!raw) return false;
+      var d = JSON.parse(raw);
+      $('assetEnabled').checked = !!d.enabled;
+      $('assetDisplay').checked = !!d.applyToDisplay;
+      $('assetUrl').value = d.url || '';
+      $('assetModel').value = d.model || '';
+      if (d.names) $('assetNames').value = d.names;
+      $('assetSaveKey').checked = !!d.saveKey;
+      if (d.saveKey && d.key) $('assetKey').value = d.key;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  $('assetTest').addEventListener('click', async function () {
+    var msg = $('assetMsg');
+    msg.className = 'err-box show';
+    msg.style.color = '#93c5fd';
+    msg.textContent = '테스트 중…';
+    try {
+      var r = await window.RisuAssets.test(readAssetConfig());
+      msg.style.color = '#86efac';
+      msg.textContent = 'OK · ' + r.url + ' · dim ' + r.dim + ' · ' + r.latencyMs + 'ms';
+    } catch (e) {
+      msg.style.color = '';
+      msg.textContent = String((e && e.message) || e);
+    }
+  });
+
+  $('assetClear').addEventListener('click', function () {
+    window.RisuAssets.clearCache();
+    var msg = $('assetMsg');
+    msg.className = 'err-box show';
+    msg.style.color = '#86efac';
+    msg.textContent = '임베딩 캐시를 비웠습니다.';
+  });
+
+  // ---- 이벤트 ----
+  document.querySelectorAll('.tabs button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.tabs button').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.pane').forEach(function (p) { p.classList.remove('active'); });
+      btn.classList.add('active');
+      $('pane-' + btn.dataset.pane).classList.add('active');
+    });
+  });
+
+  $('loadDemo').addEventListener('click', function () {
+    $('mode').value = DEMO.mode;
+    $('markdown').value = DEMO.markdown;
+    $('charName').value = DEMO.charName;
+    $('userName').value = DEMO.userName;
+    $('input').value = DEMO.input;
+    $('prevMessage').value = DEMO.prevMessage;
+    setJson($('presetRegex'), $('presetRegexErr'), DEMO.presetRegex);
+    setJson($('charRegex'), $('charRegexErr'), DEMO.charRegex);
+    setJson($('moduleRegex'), $('moduleRegexErr'), DEMO.moduleRegex);
+    setJson($('charLua'), $('charLuaErr'), DEMO.charLua);
+    setJson($('moduleLua'), $('moduleLuaErr'), DEMO.moduleLua);
+    $('assetNames').value = (DEMO.assetNames || []).join('\n');
+    setJson($('charTriggers'), $('charTriggersErr'), DEMO.charTriggers);
+    setJson($('moduleTriggers'), $('moduleTriggersErr'), DEMO.moduleTriggers);
+    setJson($('vars'), $('varsErr'), DEMO.vars);
+    setJson($('globalVars'), $('globalVarsErr'), DEMO.globalVars);
+    run();
+  });
+
+  $('runBtn').addEventListener('click', function () { run().catch(function (e) { console.error(e); }); });
+
+  var timer = null;
+  document.querySelectorAll('textarea, input, select').forEach(function (el) {
+    el.addEventListener('input', function () {
+      clearTimeout(timer);
+      saveAssetSettings();
+      timer = setTimeout(function () { run().catch(function (e) { console.error(e); }); }, 250);
+    });
+  });
+
+  // 초기 실행 (+ URL 해시로 탭 지정: #preview, #css, #html, #vars, #trace)
+  $('loadDemo').click();
+  loadAssetSettings();
+
+  // URL 쿼리로 동적 에셋 설정 주입 (테스트/공유용)
+  // 예: ?asset=1&assetUrl=http://127.0.0.1:8899/v1&assetModel=mock&assetNames=a.png,b.png
+  try {
+    var qs = new URLSearchParams(location.search);
+    if (qs.has('assetUrl')) $('assetUrl').value = qs.get('assetUrl');
+    if (qs.has('assetModel')) $('assetModel').value = qs.get('assetModel');
+    if (qs.has('assetKey')) $('assetKey').value = qs.get('assetKey');
+    if (qs.has('assetNames')) $('assetNames').value = qs.get('assetNames').split(',').join('\n');
+    if (qs.has('asset')) $('assetEnabled').checked = qs.get('asset') === '1';
+    if (qs.has('assetDisplay')) $('assetDisplay').checked = qs.get('assetDisplay') === '1';
+    if (qs.has('input')) $('input').value = qs.get('input');
+    if (qs.has('mode')) $('mode').value = qs.get('mode');
+  } catch (e) { /* 구형 브라우저 */ }
+
+  if (!$('assetNames').value.trim()) {
+    $('assetNames').value = (DEMO.assetNames || []).join('\n');
+    setJson($('charTriggers'), $('charTriggersErr'), DEMO.charTriggers);
+    setJson($('moduleTriggers'), $('moduleTriggersErr'), DEMO.moduleTriggers);
+  }
+  run().catch(function (e) { console.error(e); });
+  var h = (location.hash || '').replace('#', '');
+  if (h) {
+    var btn = document.querySelector('.tabs button[data-pane="' + h + '"]');
+    if (btn) btn.click();
+  }
+})();
+</script>
+</body>
+</html>

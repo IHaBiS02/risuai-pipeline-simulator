@@ -1,0 +1,31 @@
+# 무시 규칙
+
+## 분석 대상 저장소 (클론만 하고 커밋하지 않음)
+
+RisuAI/
+Risuai/
+PocketRisu/
+
+## 실행/빌드 산출물
+
+node_modules/
+dist/
+.chrome*/
+chrome-profile/
+cp*/
+*.log
+dom.html
+dom.err
+
+## Python
+
+__pycache__/
+*.pyc
+
+## 에디터 / OS
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
