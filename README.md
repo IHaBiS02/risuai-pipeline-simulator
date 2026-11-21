@@ -28,6 +28,7 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 ```
 .
 ├── RisuAI-pipeline-analysis.md   # 분석 문서 (1,200줄) — 10장 + 부록
+├── POSTMORTEM.md                 # 삽질 기록 — 내가 틀린 것들, 재발 방지 체크리스트
 ├── risu-sim/                     # 실행 가능한 시뮬레이터 (정적 HTML)
 │   ├── index.html                # UI
 │   ├── simulator.js              # 정규식 · CBS · CSS 스코프 · 새니타이저 · 표시 렌더
@@ -137,6 +138,8 @@ http://localhost:8080/?asset=1&assetUrl=http://127.0.0.1:8899/v1&assetModel=mock
 | After 렌더 (자산·카드 CSS) | ✅ 추가 기능 | `renderDisplay()` |
 | 플러그인 (CJS) | ⬜ 미탑재 | 설계만 |
 | 플러그인 | ⬜ 미탑재 | 훅 6개 구현 예정 |
+| 로어북 발동 | ⬜ 미탑재 | 불러와서 개수만 표시 |
+| 채팅 컨테이너 크기/테마 | ⬜ 미재현 | 정적 HTML 한계 |
 | 실제 LLM 호출 | ❌ 범위 밖 | |
 
 자세한 차이는 [risu-sim/README.md](risu-sim/README.md) 와
