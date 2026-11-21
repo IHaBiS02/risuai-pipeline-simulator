@@ -23,10 +23,12 @@
 - `src/ts/parser/parser.svelte.ts` — `encodeStyle`, `decodeStyleRule`, `decodeStyleContent`, `trimMarkdown`, `parseAdditionalAssets`, `getClosestMatch`, DOMPurify 훅 → [`risu-sim/simulator.js`](risu-sim/simulator.js)
 - `src/ts/parser/parser.svelte.ts` (`risuChatParser`, 블록 매처), `src/ts/parser/chatVar.svelte.ts`, `src/ts/util.ts`(`parseKeyValue`, `pickHashRand`) → [`risu-sim/cbs.js`](risu-sim/cbs.js)
 - `src/ts/cbs.ts`(CBS 함수 레지스트리), `src/ts/process/infunctions.ts`(`calcString`) — **수정 없이 번들** → `risu-sim/vendor/risu-core.js` ([`tools/build-vendor.mjs`](risu-sim/tools/build-vendor.mjs))
+- `src/ts/process/triggers.ts`(`runTrigger`), `src/ts/parser/chatML.ts`(`parseChatML`) — 같은 번들에 포함. `triggers.ts` 는 로직은 그대로 두고 실행 기록용 관찰 호출 5곳만 빌드 때 끼움
+- `src/ts/util.ts` `parseKeyValue` — 빌드 때 원본 소스에서 그대로 추출
 - `src/styles.css` — Tailwind 로 컴파일해 `.risu-scope` 아래로 가둔 것 → `risu-sim/vendor/risu-chat.css` ([`tools/build-css.mjs`](risu-sim/tools/build-css.mjs))
 - `src/ts/parser/tests/cbs/*.test.ts`, `trimMarkdownStyle.test.ts`, `assetSrcSanitize.test.ts` — 이식본 검증에 그대로 사용 (저장소에 포함하지 않음)
 - `src/ts/process/scriptings.ts` — `luaCodeWrapper`, `runLuaEditTrigger`, `runScripted` → [`risu-sim/lua-runtime.js`](risu-sim/lua-runtime.js)
-- `src/ts/process/triggers.ts` — `runTrigger`, 조건 평가, indent 인터프리터, allowlist → [`risu-sim/trigger-runtime.js`](risu-sim/trigger-runtime.js)
+- `src/ts/characterCards.ts` (`convertCharbook`), `src/ts/process/scripts.ts` (`processScriptCache`), `src/lib/SideBars/Toggles.svelte` (토글 묶기·그리기) → [`risu-sim/importer.js`](risu-sim/importer.js), [`risu-sim/simulator.js`](risu-sim/simulator.js), [`risu-sim/index.html`](risu-sim/index.html)
 - `src/ts/process/memory/hypamemory.ts` — 임베딩 요청 형식(`custom` 경로) → [`risu-sim/asset-runtime.js`](risu-sim/asset-runtime.js)
 - `src/ts/storage/database.svelte.ts` (`importPreset`, `downloadPreset`), `src/ts/process/modules.ts` (`readModule`), `src/ts/process/processzip.ts` (`CharXImporter`), `src/ts/characterCards.ts` (`importCharacterProcess`, `importCharacterCardSpec`), `src/ts/interchangeability.ts` (`convertCharacterToModule`), `src/ts/util.ts` (`encryptBuffer`/`decryptBuffer`) — 파일 포맷 해석 → [`risu-sim/importer.js`](risu-sim/importer.js)
 

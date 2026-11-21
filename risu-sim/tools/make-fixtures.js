@@ -223,6 +223,7 @@ const PRESET = {
     }
   ],
   templateDefaultVariables: 'hp=77\ntoggle_flag=1',
+  customPromptTemplateToggle: 'ptog=프리셋 토글\npmode=프리셋 모드=select=A,B',
   temperature: 80,
   promptTemplate: [{ type: 'plain', type2: 'main', text: 'You are {{char}}.', role: 'system' }]
 };
@@ -480,7 +481,7 @@ async function main() {
               comment: 'open',
               type: 'display',
               conditions: [],
-              effect: [{ type: 'v2SetVar', var: 'revealed', operator: '=', value: '1', indent: 0 }]
+              effect: [{ type: 'v2SetVar', valueType: 'value', var: 'revealed', operator: '=', value: '1', indent: 0 }]
             }
           ],
           toggles: 'cot=CoT 로그\ntone=톤=select=밝게,어둡게\nnote=메모=text',

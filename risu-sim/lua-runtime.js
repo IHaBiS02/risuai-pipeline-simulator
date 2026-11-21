@@ -230,6 +230,8 @@
     });
     g.set('reloadDisplay', function () {
       if (!guardSafe()) return;
+      // scriptings.ts:321 ReloadGUIPointer + 1 → resetScriptCache()
+      if (window.RisuSim && window.RisuSim.resetScriptCache) window.RisuSim.resetScriptCache();
     });
     g.set('reloadChat', function () {
       if (!guardSafe()) return;

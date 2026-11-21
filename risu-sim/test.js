@@ -1,7 +1,7 @@
 const fs = require('fs');
 const vm = require('vm');
 const src = fs.readFileSync('simulator.js', 'utf8');
-const sandbox = { window: {}, console, Intl, Date, Math, Number, Boolean, Error, TypeError, Promise, Proxy, Reflect, Symbol, Int16Array, Int32Array, Uint32Array, Float64Array, encodeURIComponent, decodeURIComponent, isNaN, isFinite, setTimeout, clearTimeout, TextEncoder, TextDecoder, Set, Map, Array, Object, String, JSON, RegExp, parseInt, parseFloat, Uint8Array };
+const sandbox = { window: {}, console, Intl, Date, Math, Number, Boolean, Error, TypeError, Promise, Proxy, Reflect, Symbol, Int16Array, Int32Array, Uint32Array, Float64Array, encodeURIComponent, decodeURIComponent, isNaN, isFinite, setTimeout, clearTimeout, TextEncoder, TextDecoder, Set, Map, Array, Object, String, JSON, RegExp, parseInt, parseFloat, Uint8Array, structuredClone };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('vendor/risu-core.js', 'utf8'), sandbox);
@@ -210,7 +210,7 @@ const st = (ctx, k) => ctx.scriptstate['$' + k];
 
 console.log('\n[13] 트리거 — type 필터 / triggerlua 우회');
 {
-  const { r } = await runTrig([{ comment: 't', type: 'start', conditions: [], effect: [{ type: 'v2SetVar', var: 'a', operator: '=', value: '1', indent: 0 }] }], 'display');
+  const { r } = await runTrig([{ comment: 't', type: 'start', conditions: [], effect: [{ type: 'v2SetVar', valueType: 'value', var: 'a', operator: '=', value: '1', indent: 0 }] }], 'display');
   eq('type 불일치 → 스킵', !!r.trace[0].skipped, true);
 }
 {
@@ -222,14 +222,14 @@ console.log('\n[14] 트리거 — 조건');
 {
   const { r, ctx } = await runTrig([{
     comment: 'c', type: 'start', conditions: [{ type: 'value', var: 'a', operator: '=', value: 'a' }],
-    effect: [{ type: 'v2SetVar', var: 'hit', operator: '=', value: '1', indent: 0 }]
+    effect: [{ type: 'v2SetVar', valueType: 'value', var: 'hit', operator: '=', value: '1', indent: 0 }]
   }], 'start');
   eq('조건 참 → 실행', st(ctx, 'hit'), '1');
 }
 {
   const { r, ctx } = await runTrig([{
     comment: 'c', type: 'start', conditions: [{ type: 'value', var: 'a', operator: '=', value: 'b' }],
-    effect: [{ type: 'v2SetVar', var: 'hit', operator: '=', value: '1', indent: 0 }]
+    effect: [{ type: 'v2SetVar', valueType: 'value', var: 'hit', operator: '=', value: '1', indent: 0 }]
   }], 'start');
   eq('조건 거짓 → 스킵', st(ctx, 'hit'), undefined);
 }
@@ -237,11 +237,11 @@ console.log('\n[14] 트리거 — 조건');
 console.log('\n[15] 트리거 — v2If indent 제어');
 {
   const eff = [
-    { type: 'v2SetVar', var: 'x', operator: '=', value: '1', indent: 0 },
+    { type: 'v2SetVar', valueType: 'value', var: 'x', operator: '=', value: '1', indent: 0 },
     { type: 'v2If', source: 'x', sourceType: 'var', condition: '=', target: '2', targetType: 'value', indent: 0 },
-    { type: 'v2SetVar', var: 'y', operator: '=', value: 'NO', indent: 1 },
+    { type: 'v2SetVar', valueType: 'value', var: 'y', operator: '=', value: 'NO', indent: 1 },
     { type: 'v2EndIndent', indent: 1 },
-    { type: 'v2SetVar', var: 'z', operator: '=', value: 'OK', indent: 0 }
+    { type: 'v2SetVar', valueType: 'value', var: 'z', operator: '=', value: 'OK', indent: 0 }
   ];
   const { ctx } = await runTrig([{ comment: 'i', type: 'start', conditions: [], effect: eff }], 'start');
   eq('if 거짓 → 블록 스킵', st(ctx, 'y'), undefined);
@@ -249,9 +249,9 @@ console.log('\n[15] 트리거 — v2If indent 제어');
 }
 {
   const eff = [
-    { type: 'v2SetVar', var: 'x', operator: '=', value: '2', indent: 0 },
+    { type: 'v2SetVar', valueType: 'value', var: 'x', operator: '=', value: '2', indent: 0 },
     { type: 'v2If', source: 'x', sourceType: 'var', condition: '=', target: '2', targetType: 'value', indent: 0 },
-    { type: 'v2SetVar', var: 'y', operator: '=', value: 'YES', indent: 1 },
+    { type: 'v2SetVar', valueType: 'value', var: 'y', operator: '=', value: 'YES', indent: 1 },
     { type: 'v2EndIndent', indent: 1 }
   ];
   const { ctx } = await runTrig([{ comment: 'i', type: 'start', conditions: [], effect: eff }], 'start');
@@ -259,12 +259,12 @@ console.log('\n[15] 트리거 — v2If indent 제어');
 }
 {
   const eff = [
-    { type: 'v2SetVar', var: 'x', operator: '=', value: '3', indent: 0 },
+    { type: 'v2SetVar', valueType: 'value', var: 'x', operator: '=', value: '3', indent: 0 },
     { type: 'v2If', source: 'x', sourceType: 'var', condition: '=', target: '1', targetType: 'value', indent: 0 },
-    { type: 'v2SetVar', var: 'a', operator: '=', value: 'A', indent: 1 },
+    { type: 'v2SetVar', valueType: 'value', var: 'a', operator: '=', value: 'A', indent: 1 },
     { type: 'v2EndIndent', indent: 1 },
     { type: 'v2Else', indent: 0 },
-    { type: 'v2SetVar', var: 'b', operator: '=', value: 'B', indent: 1 },
+    { type: 'v2SetVar', valueType: 'value', var: 'b', operator: '=', value: 'B', indent: 1 },
     { type: 'v2EndIndent', indent: 1 }
   ];
   const { ctx } = await runTrig([{ comment: 'i', type: 'start', conditions: [], effect: eff }], 'start');
@@ -285,9 +285,9 @@ console.log('\n[16] 트리거 — 루프 / StopTrigger');
 }
 {
   const eff = [
-    { type: 'v2SetVar', var: 'a', operator: '=', value: '1', indent: 0 },
+    { type: 'v2SetVar', valueType: 'value', var: 'a', operator: '=', value: '1', indent: 0 },
     { type: 'v2StopTrigger', indent: 0 },
-    { type: 'v2SetVar', var: 'b', operator: '=', value: '2', indent: 0 }
+    { type: 'v2SetVar', valueType: 'value', var: 'b', operator: '=', value: '2', indent: 0 }
   ];
   const { ctx } = await runTrig([{ comment: 's', type: 'start', conditions: [], effect: eff }], 'start');
   eq('StopTrigger 이후 실행 안 됨', st(ctx, 'b'), undefined);
@@ -297,11 +297,12 @@ console.log('\n[17] 트리거 — display allowlist / tempVars');
 {
   const eff = [
     { type: 'v2ModifyChat', index: '0', indexType: 'value', value: 'X', valueType: 'value', indent: 0 },
-    { type: 'v2SetVar', var: 'v', operator: '=', value: '1', indent: 0 }
+    { type: 'v2SetVar', valueType: 'value', var: 'v', operator: '=', value: '1', indent: 0 }
   ];
   const { r, ctx } = await runTrig([{ comment: 'd', type: 'display', conditions: [], effect: eff }], 'display', { displayMode: true, displayData: 'orig' });
   const run = r.trace[0].effectsRun;
-  eq('display allowlist 밖 effect 스킵', !!run.find(e => e.type === 'v2ModifyChat').skipped, true);
+  eq('display allowlist 밖 effect 는 실행 안 됨', run.some(e => e.type === 'v2ModifyChat'), false);
+  eq('display 모드는 chat 을 안 바꿈', ctx.chat[0].data, 'hello');
   eq('displayMode setVar 는 저장 안 됨', ctx.scriptstate['$v'], undefined);
   eq('displayMode setVar 는 tempVars 에 기록', r.tempVars.v, '1');
 }
@@ -312,6 +313,82 @@ console.log('\n[17] 트리거 — display allowlist / tempVars');
   ];
   const { r } = await runTrig([{ comment: 'd', type: 'display', conditions: [], effect: eff }], 'display', { displayMode: true, displayData: 'ORIGINAL' });
   eq('displayData 왕복', r.displayData, 'ORIGINAL');
+}
+
+console.log('\n[17-b] 트리거 — 원본 runTrigger (문자열 치환 · 딕셔너리 · lowLevelAccess · 로어북)');
+{
+  const eff = [
+    { type: 'v2ReplaceString', source: 'a-b-c', sourceType: 'value', regex: '-', regexType: 'value', result: '$0', resultType: 'value',
+      replacement: '+', replacementType: 'value', flags: 'g', flagsType: 'value', outputVar: 'out', indent: 0 }
+  ];
+  const { ctx } = await runTrig([{ comment: 'r', type: 'start', conditions: [], effect: eff }], 'start');
+  eq('v2ReplaceString', st(ctx, 'out'), 'a+b+c');
+}
+{
+  const eff = [
+    { type: 'v2MakeDictVar', var: 'd', indent: 0 },
+    { type: 'v2SetDictVar', var: 'd', varType: 'var', key: 'hp', keyType: 'value', value: '10', valueType: 'value', indent: 0 },
+    { type: 'v2GetDictVar', var: 'd', varType: 'var', key: 'hp', keyType: 'value', outputVar: 'got', indent: 0 },
+    { type: 'v2GetDictSize', var: 'd', varType: 'var', outputVar: 'n', indent: 0 }
+  ];
+  const { ctx } = await runTrig([{ comment: 'd', type: 'start', conditions: [], effect: eff }], 'start');
+  eq('딕셔너리 set/get', st(ctx, 'got'), '10');
+  eq('딕셔너리 크기', st(ctx, 'n'), '1');
+  eq('딕셔너리 JSON', st(ctx, 'd'), '{"hp":"10"}');
+}
+{
+  const t = () => [{ comment: 'x', type: 'start', conditions: [], effect: [
+    { type: 'extractRegex', value: 'HP 42', regex: '(\\d+)', flags: '', result: '$1', inputVar: 'hp' }
+  ] }];
+  const off = await runTrig(t(), 'start');
+  eq('lowLevelAccess 없으면 extractRegex 무시', st(off.ctx, 'hp'), undefined);
+  const on = await runTrig(t(), 'start', { charLowLevelAccess: true });
+  eq('캐릭터 lowLevelAccess → extractRegex 실행', st(on.ctx, 'hp'), '42');
+  eq('trace 에 lowLevelAccess 표시', on.r.trace[0].lowLevelAccess, true);
+  const modTrig = t().map(x => Object.assign(x, { lowLevelAccess: true }));
+  const cm = await runTrig(modTrig, 'start');
+  eq('캐릭터 트리거의 자체 lowLevelAccess 는 char 값으로 덮어씀', st(cm.ctx, 'hp'), undefined);
+  const mm = await runTrig([], 'start', { moduleTriggers: modTrig });
+  eq('모듈 트리거는 module.lowLevelAccess 를 따름', st(mm.ctx, 'hp'), '42');
+}
+{
+  const eff = [{ type: 'v2GetLorebookCountNew', outputVar: 'n', indent: 0 }, { type: 'v2GetLorebookByIndex', index: '0', indexType: 'value', outputVar: 'lb', indent: 0 }];
+  const { ctx } = await runTrig([{ comment: 'l', type: 'start', conditions: [], effect: eff }], 'start',
+    { globalLore: [{ key: 'a', comment: 'A', content: 'lore!', mode: 'normal', insertorder: 100, alwaysActive: false, secondkey: '', selective: false }] });
+  eq('로어북 개수', st(ctx, 'n'), '1');
+  eq('로어북 항목 읽기', st(ctx, 'lb'), 'lore!');
+}
+{
+  const { r } = await runTrig([{ comment: 'c', type: 'start', conditions: [], effect: [{ type: 'v2ConsoleLog', source: 'hi', sourceType: 'value', indent: 0 }] }], 'start');
+  eq('v2ConsoleLog 는 trace 로그로', r.trace[0].logs.includes('hi'), true);
+}
+{
+  const { r } = await runTrig([{ comment: 'q', type: 'start', conditions: [], effect: [{ type: 'v2RunLLM', value: 'x', valueType: 'value', model: 'model', outputVar: 'o', indent: 0 }] }], 'start', { charLowLevelAccess: true });
+  eq('네트워크 effect 는 지원 안 함 표시', /지원 안 함/.test(r.trace[0].effectsRun[0].skipped || ''), true);
+}
+
+console.log('\n[17-c] 표시 결과 캐시 (processScriptCache)');
+{
+  sim.resetScriptCache();
+  const presetRegex = [{ comment: 'v', in: 'X', out: '{{getvar::hp}}', type: 'editdisplay' }];
+  const a = await sim.run({ mode: 'editdisplay', input: 'X', presetRegex, vars: { hp: '1' } });
+  const b = await sim.run({ mode: 'editdisplay', input: 'X', presetRegex, vars: { hp: '2' } });
+  eq('첫 실행', a.finalText.includes('1'), true);
+  eq('같은 본문 → 캐시 적중, 이전 값 유지(원본 동작)', b.finalText.includes('1') && !b.finalText.includes('2'), true);
+  eq('캐시 적중 표시 + 결과 다름 경고', !!b.trace.find(t => t.cacheHit && t.cacheStale), true);
+  sim.resetScriptCache();
+  const c = await sim.run({ mode: 'editdisplay', input: 'X', presetRegex, vars: { hp: '2' } });
+  eq('캐시 비우면 새 값', c.finalText.includes('2'), true);
+  // 트리거가 변수를 바꾸면 원본은 캐시를 비운다 (ReloadGUIPointer)
+  await sim.run({ mode: 'editdisplay', input: 'X', presetRegex, vars: { hp: '3' } });
+  await sim.run({ mode: 'editoutput', input: 'y', chatID: 0, charTriggers: [{ comment: 'o', type: 'output', conditions: [], effect: [{ type: 'v2SetVar', valueType: 'value', var: 'z', operator: '=', value: '1', indent: 0 }] }] });
+  eq('트리거 변수 변경 → 캐시 비움', sim.scriptCacheSize(), 1);
+  sim.setScriptCache(false);
+  const d1 = await sim.run({ mode: 'editdisplay', input: 'X', presetRegex, vars: { hp: '4' } });
+  const d2 = await sim.run({ mode: 'editdisplay', input: 'X', presetRegex, vars: { hp: '5' } });
+  eq('캐시 끄면 매번 새로', d1.finalText.includes('4') && d2.finalText.includes('5'), true);
+  sim.setScriptCache(true);
+  sim.resetScriptCache();
 }
 
 console.log('\n[18] importer — 파일 형식 (픽스처는 실제 라이브러리로 생성)');
@@ -354,6 +431,7 @@ console.log('\n[19] importer — 프리셋 내용');
     eq(f + ' 정규식 2개', e.regex.length, 2);
     eq(f + ' order 플래그 보존', e.regex[1].flag, 'g,<order 5>');
     eq(f + ' 기본 변수', JSON.stringify(e.vars), '{"hp":"77","toggle_flag":"1"}');
+    eq(f + ' 프리셋 토글(customPromptTemplateToggle)', e.toggles, 'ptog=프리셋 토글\npmode=프리셋 모드=select=A,B');
   }
 }
 
@@ -530,7 +608,7 @@ console.log('\n[24] 에셋 이미지 — charx 바이트 추출 + srcOf');
 console.log('\n[25] 변수 공간 통일 — getvar == scriptstate[$k]');
 {
   // RisuAI chatVar.svelte.ts:6 — 채팅 변수는 chat.scriptstate['$key'] 다.
-  const eff = [{ type: 'v2SetVar', var: 'revealed', operator: '=', value: '1', indent: 0 }];
+  const eff = [{ type: 'v2SetVar', valueType: 'value', var: 'revealed', operator: '=', value: '1', indent: 0 }];
   const trig = [{ comment: 'open', type: 'display', conditions: [], effect: eff }];
 
   const r = await sim.run({
@@ -560,7 +638,7 @@ console.log('\n[25] 변수 공간 통일 — getvar == scriptstate[$k]');
 
 console.log('\n[26] 기능 토글 — 트리거/Lua 끄기');
 {
-  const trig = [{ comment: 't', type: 'display', conditions: [], effect: [{ type: 'v2SetVar', var: 'x', value: '1', indent: 0 }] }];
+  const trig = [{ comment: 't', type: 'display', conditions: [], effect: [{ type: 'v2SetVar', valueType: 'value', var: 'x', value: '1', indent: 0 }] }];
   const on = await sim.run({ mode: 'editdisplay', input: 'a', charRegex: [], charTriggers: trig });
   eq('트리거 켜면 발화', /트리거\(display\)/.test(on.trace.map((t) => t.stage).join(',')), true);
   eq('트리거 켜면 실행됨', on.trace.some((t) => t.triggerTrace && t.triggerTrace.some((x) => !x.skipped)), true);

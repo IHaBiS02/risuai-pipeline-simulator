@@ -11,16 +11,16 @@ risu-sim/
 ├── importer.js         파일 로더 (.risup · .charx · .module · .risum · .png · .json)
 ├── lua-runtime.js      Lua 레이어 (wasmoon, listenEdit 4종)
 ├── asset-runtime.js    동적 에셋 (OpenAI 호환 /embeddings)
-├── trigger-runtime.js  트리거 VM (조건 / indent 인터프리터 / 35 effect)
+├── trigger-runtime.js  원본 runTrigger 에 앱 상태를 넣어 주는 어댑터 (VM 자체는 vendor/risu-core.js)
 ├── ADDING-RUNTIMES.md  트리거·플러그인·동적 에셋 설계
-├── test.js             단위 테스트 134개 (node test.js)
+├── test.js             단위 테스트 157개 (node test.js)
 ├── tools/
 │   ├── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
 │   ├── make-fixtures.js    테스트용 실제 포맷 파일 생성기 (msgpackr + fflate)
 │   ├── fixtures/           위 스크립트로 만든 .risup / .charx / .module …
 │   ├── build-vendor.mjs    vendor/risu-core.js 생성 (원본 cbs.ts + 원본과 같은 버전 라이브러리)
 │   ├── build-css.mjs       vendor/risu-chat.css 생성 (원본 styles.css → Tailwind 컴파일)
-│   ├── ui-test.html        브라우저 UI 통합 테스트 113개 (iframe 안에서 실제 클릭, 실제 Lua)
+│   ├── ui-test.html        브라우저 UI 통합 테스트 121개 (iframe 안에서 실제 클릭, 실제 Lua)
 │   └── shot.html           스크린샷 촬영용 페이지
 ├── vendor/
 │   ├── wasmoon/        Lua 5.4 WASM 런타임 (index.js + glue.wasm)
@@ -118,13 +118,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-113개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+121개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (113 checks)</pre>
+# → <pre id="out">ALL PASS (121 checks)</pre>
 ```
 
 ## 보기 모드 — 실제 이미지 / HTML 코드
@@ -174,9 +174,16 @@ RisuAI 는 메시지를 **말풍선으로 감싸지 않고** 채팅 영역 전�
 
 **변수 탭**에서 값을 직접 고칠 수 있습니다 (키/값 편집, 추가, 삭제 → 즉시 재실행).
 
-### 모듈 토글 (`customModuleToggle`)
+### 토글 (프리셋 · 모듈 · 캐릭터)
 
-`key=라벨=타입=옵션` 형식을 그대로 파싱합니다 (`util.ts:1049` 포팅).
+원본 사이드바(`Toggles.svelte:71`)처럼 **세 곳의 토글을 한 패널에** 이 순서로 이어 붙입니다.
+
+1. 선택한 프리셋의 `customPromptTemplateToggle`
+2. 체크한 모듈 전부의 `customModuleToggle` (`getModuleToggles`, 모듈 목록 순서)
+3. 봇 카드의 `extensions.risuai.toggles` (`char.customModuleToggle`)
+
+`key=라벨=타입=옵션` 형식을 그대로 파싱합니다 (`util.ts:1049` 포팅). 그룹은 원본처럼
+`group` 부터 `groupEnd` 까지를 묶으므로, 한 모듈에서 `groupEnd` 를 빠뜨리면 뒤 모듈의 토글도 그 그룹 안에 들어갑니다(원본도 같음).
 
 ```
 cot=CoT 로그                 → 체크박스 (toggle_cot = '1' / '0')
@@ -187,6 +194,9 @@ caption / divider             → 라벨 / 구분선
 ```
 
 값은 전역 변수 `toggle_<key>` 에 들어가고, 카드에서는 `{{#when::toggle::cot}}` 로 읽습니다.
+한 번도 건드리지 않은 토글은 값이 없습니다(`{{getglobalvar::toggle_x}}` → `null`, 원본과 같음).
+프리셋 정규식 중에는 출력이 `{{#if {{? {{getglobalvar::toggle_x}}=1 }}}}$&{{/if}}` 처럼 토글에 묶인 것이 많아서,
+토글을 켜기 전에는 결과가 빈 문자열로 나옵니다.
 **패널을 다시 그리지 않고 값만 맞추기** 때문에 조작 중에 포커스나 체크가 날아가지 않습니다.
 
 ### 실행 기능 토글
@@ -196,6 +206,19 @@ caption / divider             → 라벨 / 구분선
 | **트리거 실행** | `runTrigger` 5곳을 모두 건너뛰고 트레이스에 "사용 안 함" 표시 |
 | **Lua 실행** | `listenEdit` 훅을 실행하지 않음 |
 | **변수 유지** | 매 실행을 입력값에서 시작 (트리거가 바꾼 변수가 이어지지 않음) |
+| **표시 캐시** | 원본 `processScriptCache` 를 끔 (매 실행 정규식을 새로 돌림) |
+
+### 표시 캐시 (`processScriptCache`)
+
+원본은 정규식 결과를 **CBS 를 거친 본문 + 모드 + 그 모드 스크립트의 in/out/flag + chatID** 를 키로 기억합니다
+(`scripts.ts:68-97`). 변수 값은 키에 없어서, **정규식 출력 안의 `{{getvar}}` 만 바뀌면 이전 결과가 그대로** 나옵니다.
+캐시가 맞으면 정규식과 동적 에셋을 건너뛰고(`@@inject` 같은 부작용도 안 일어남) 저장된 결과를 씁니다.
+
+- 비워지는 때(원본): 트리거가 변수를 바꿈 · Lua `reloadDisplay()` · 모듈 구성 변경 · 채팅 전환 (`ReloadGUIPointer`)
+- 시뮬레이터는 여기에 더해 **토글 · 변수 편집 · 파일 선택**을 바꿀 때도 비웁니다. 원본에서는 이때 화면을 다시 그리지 않아서
+  어차피 바뀐 결과가 안 보이는데, 시뮬레이터는 매번 다시 그리므로 오래된 결과가 남지 않게 했습니다.
+- 캐시가 맞으면 트레이스에 **⑤ 정규식 — 캐시 적중** 이 뜨고, 비교용으로 다시 돌린 결과가 다르면 ⚠ 로 알려 줍니다.
+- "캐시 비우기" 버튼 / `RisuSim.resetScriptCache()` / `RisuSim.setScriptCache(false)`
 
 ## 카드 배경 (backgroundHTML)
 
@@ -278,7 +301,7 @@ after  [RENDER · CBS]
 
 ```bash
 cd risu-sim && node test.js
-# → 134 passed, 0 failed
+# → 157 passed, 0 failed
 ```
 
 ### vendor 파일 다시 만들기
@@ -295,7 +318,11 @@ node tools/build-css.mjs ../Risuai <RisuAI>/node_modules
 
 ## 트리거
 
-봇/모듈 트리거를 JSON 으로 넣으면 `runTrigger` 를 그대로 재현합니다.
+트리거 VM 은 **원본 `triggers.ts` 의 `runTrigger` 를 그대로** 씁니다 (`vendor/risu-core.js`).
+`trigger-runtime.js` 는 원본이 읽는 앱 상태(DB · 현재 캐릭터 · 현재 채팅 · 모듈 트리거)를 채워 주고 실행 기록을 모을 뿐입니다.
+그래서 문자열 치환(`v2ReplaceString`) · 딕셔너리 · 배열 · 로컬 변수 · 로어북 CRUD · `v2Calculate`(원본 `calcString`) 등
+모든 effect 가 원본과 같은 코드로 돌아갑니다. 실행 기록은 빌드할 때 원본 코드의 정해진 위치에 관찰 호출만 끼워서 모읍니다
+(`tools/build-vendor.mjs` `instrumentTriggers` — 기준 문자열이 바뀌면 빌드가 멈춤).
 
 | 모드 | 실행되는 트리거 패스 |
 |---|---|
@@ -310,6 +337,17 @@ node tools/build-css.mjs ../Risuai <RisuAI>/node_modules
 2. `display`/`request` 패스는 **allowlist 의 effect 만** 실행 (`triggers.ts:1331`)
 3. 재귀 깊이 **10**, `lowLevelAccess` 는 무제한
 4. `v2StopTrigger` → `index = effect.length`
+
+### lowLevelAccess
+
+- 캐릭터 트리거: **전부 `char.lowLevelAccess`** 로 덮어씁니다 (`triggers.ts:1081`, 트리거 자체 값은 무시)
+- 모듈 트리거: 각자 **그 모듈의 `lowLevelAccess`** (`modules.ts:473`)
+- 꺼져 있으면 `extractRegex` · `runLLM` · `checkSimilarity` · `runImgGen` · `sendAIprompt` · `showAlert` (v1/v2) 를 건너뛰고,
+  재귀 깊이 10 제한이 걸립니다. Lua `editDisplay`/`editOutput` 같은 편집 훅은 원본처럼 항상 꺼진 상태로 돕니다.
+- 켜져 있어도 네트워크가 필요한 effect(LLM · 이미지 생성 · 유사도)는 시뮬레이터에서 실패 값으로 진행하고 "지원 안 함" 으로 표시합니다.
+
+> ⚠️ `v2SetVar` 등의 `valueType` 이 없으면 원본은 `value` 를 **변수 이름**으로 읽습니다(`getVar(value)`).
+> RisuAI 편집기는 항상 `valueType` 을 넣으므로, 손으로 쓴 트리거 JSON 이라면 꼭 넣으세요.
 
 > ⚠️ `v2Else` 는 **`v2EndIndent` 뒤에** 옵니다. `v2If`-본문-`v2EndIndent`-`v2Else`-본문-`v2EndIndent` 순서입니다.
 > (원본 `triggers.ts:1727-1731` 이 `effect[index+1]` 에서 `v2Else` 를 찾기 때문)
@@ -383,9 +421,12 @@ python3 tools/mock-embeddings.py 8899
 | 마크다운 | **원본 그대로** (markdown-it 14.3.3, 원본 옵션·인용부호 `<mark risu-mark>`, hljs, KaTeX) | `parser.svelte.ts:24-44, 156-410` |
 | 채팅 CSS (`text chat-width chattext prose`, Tailwind preflight·typography, FontColor 변수) | **원본 그대로** (컴파일 결과) | `Chat.svelte:540`, `styles.css` |
 | 배경 레이어 (`.chattext` 밖, `'back'` 모드로 Lua·display 트리거·정규식 통과) | **1:1** | `BackgroundDom.svelte` |
-| **트리거** — `runTrigger` 5곳, `effect[0]=triggerlua` 타입 우회, display/request allowlist, 재귀 10 | **1:1** | `triggers.ts:1058` |
-| **트리거 effect** — safeSubset 35개 + display/request 상태 5개 | **1:1** | `triggers.ts:975-1036` |
-| **트리거** — `runLLM`/`imgGen`/`command`/로어북 CRUD/alert | **스텁** (배지 표시) | — |
+| **트리거** — 원본 `runTrigger` 그대로 (모든 effect · 조건 · allowlist · 재귀 · 로컬 변수) | **원본 코드** | `triggers.ts:1058` |
+| **트리거 lowLevelAccess** — 캐릭터는 `char.lowLevelAccess`, 모듈은 `module.lowLevelAccess` | **원본 코드** | `triggers.ts:1073`, `modules.ts:473` |
+| **트리거 로어북 effect** — `char.globalLore` (카드 `character_book` → `convertCharbook`) | **원본 코드** | `characterCards.ts:1093` |
+| **트리거** — `runLLM`/`imgGen`/유사도/`command`/알림 입력 | **스텁** (실패 값 + 배지) | 네트워크·UI 필요 |
+| **표시 캐시** — `processScriptCache` 키·적중·초기화 | **1:1** | `scripts.ts:68-97, 136, 384` |
+| **토글 패널** — 프리셋 + 모듈 + 캐릭터, 그룹·구분선 규칙 | **1:1** | `Toggles.svelte:71-170` |
 | **동적 에셋** — 실행 조건 3개, 정확일치→레벤슈타인→임베딩, `bestMatchCache` | **1:1** | `scripts.ts:345-382` |
 | **자산 태그 해석** (`parseAdditionalAssets`) | **1:1** (charx 이미지는 실제 `<img>`/`url()`) | `parser.svelte.ts:486-598` |
 | **파일 불러오기** — `.risup` rpack/zlib/msgpack/AES-GCM, `.charx` ZIP, `.risum`, PNG `tEXt` | **1:1** | `database.svelte.ts:2385`, `modules.ts:125`, `characterCards.ts:61` |
@@ -413,8 +454,8 @@ CBS 함수는 원본 `src/ts/cbs.ts` 를 **수정 없이 번들**해 씁니다(2
 |---|---|
 | 원본 테스트 | `parser/tests/cbs/*` 59개 + `trimMarkdownStyle` 11개 + `assetSrcSanitize` 2개 → 이식본에 그대로 실행 |
 | 차등 퍼징 | 무작위 CBS·마크다운 4000개를 **원본 `risuChatParser`/`ParseMarkdown`** 과 이식본에 넣어 출력·변수 비교 → 차이 0 |
-| `node test.js` | 134개 |
-| `tools/ui-test.html` | 113개 (실제 Lua 포함) |
+| `node test.js` | 157개 |
+| `tools/ui-test.html` | 121개 (실제 Lua 포함) |
 
 ### 원본과 의도적으로 다른 부분
 
@@ -426,7 +467,6 @@ CBS 함수는 원본 `src/ts/cbs.ts` 를 **수정 없이 번들**해 씁니다(2
 | 로어북 발동 | 미구현 (불러와서 개수만 표시) | 스캔·토큰 계산 필요 |
 | 에셋 이미지 | 바이트가 없는 에셋만 자리표시자. V3 `x-risu-asset`→additionalAssets, `emotion`→emotionImages 로 원본처럼 분류 | 저장소 없음 |
 | `<Thoughts>` 문구 | 한국어(`생각의 사슬`) 기본, `RisuSim.setLanguage('en')` 로 변경 | 언어 설정 |
-| 캐시(`processScriptCache`) | 미구현 | 결과에 영향 없음 |
 | `#when` 내부 CBS | 원본과 동일하게 **false 여도 실행** | `parser.svelte.ts:1737-1760` |
 | `#if` 내부 CBS | 원본과 동일하게 **false 면 미실행** | `parser.svelte.ts:1214-1224` |
 

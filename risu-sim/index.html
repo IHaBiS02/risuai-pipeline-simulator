@@ -215,6 +215,8 @@
   }
   .toggle-host .tg-caption { font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-top: 4px; }
   .toggle-host hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+  .toggle-host .tg-divider { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .toggle-host .tg-divider hr { flex: 1; }
   .toggle-host details > summary { cursor: pointer; font-size: 12.5px; color: var(--text); padding: 3px 0; }
   .toggle-host details > div { padding-left: 14px; display: grid; gap: 6px; }
 
@@ -404,16 +406,21 @@
         <label class="chk"><input type="checkbox" id="featTriggers" checked> 트리거 실행</label>
         <label class="chk"><input type="checkbox" id="featLua" checked> Lua 실행</label>
         <label class="chk"><input type="checkbox" id="featPersist" checked> 변수 유지</label>
+        <label class="chk" title="원본 processScriptCache — 같은 본문이면 정규식을 다시 돌리지 않고 이전 결과를 씁니다"><input type="checkbox" id="featCache" checked> 표시 캐시</label>
+        <button type="button" class="mini" id="cacheClear" title="processScriptCache 비우기 (원본: 채팅 전환 · 트리거 변수 변경 · reloadDisplay)">캐시 비우기</button>
         <label class="chk" title="결과 위에 봇 이름/아이콘 머리말을 표시합니다 (실제 채팅에는 없는 경우가 많습니다)"><input type="checkbox" id="featHead"> 이름·아바타</label>
       </div>
       <div class="ib-note">
         <b>변수 유지</b>를 켜면 실행 결과로 바뀐 변수·트리거 scriptstate 가 다음 실행으로 이어집니다
         (버튼 트리거가 변수를 바꾸는 카드 UI 에 필요). 끄면 매번 입력값에서 시작합니다.
+        <b>표시 캐시</b>는 원본과 같이 정규식 결과를 본문 기준으로 기억합니다. 그래서 정규식 출력 안의
+        <code>{{getvar}}</code> 만 바뀌면 이전 결과가 그대로 나옵니다(원본도 같음). 트리거가 변수를 바꾸거나 Lua 가
+        <code>reloadDisplay()</code> 를 부르면 비워지고, 시뮬레이터에서는 토글·변수 편집·파일 선택을 바꿀 때도 비웁니다.
       </div>
     </div>
 
     <div class="field" id="toggleField" style="display:none">
-      <label>모듈 토글 <span class="hint">customModuleToggle → toggle_*</span></label>
+      <label>토글 <span class="hint">프리셋 → 모듈 → 캐릭터 순 · toggle_*</span></label>
       <div id="toggleHost" class="toggle-host"></div>
     </div>
 
@@ -671,7 +678,8 @@
     charLua: [
       {
         comment: '봇 Lua: editDisplay 로 상태 표시 추가 (정규식보다 먼저 실행됨)',
-        type: '',
+        type: 'start',
+        conditions: [],
         effect: [
           {
             type: 'triggerlua',
@@ -693,7 +701,7 @@
         type: 'display',
         conditions: [],
         effect: [
-          { type: 'v2SetVar', var: 'hp', operator: '=', value: '{{getvar::hp}}', indent: 0 },
+          { type: 'v2SetVar', var: 'hp', operator: '=', value: '{{getvar::hp}}', valueType: 'value', indent: 0 },
           { type: 'v2If', source: 'hp', sourceType: 'var', condition: '<=', target: '50', targetType: 'value', indent: 0 },
           { type: 'v2GetDisplayState', outputVar: 'raw', indent: 1 },
           { type: 'v2ConcatString', source1: 'raw', source1Type: 'var', source2: '\n\n**[HP 낮음: {{getvar::hp}}]**', source2Type: 'value', outputVar: 'out', indent: 1 },
@@ -778,7 +786,8 @@
   }
 
   // 실행 사이에 유지되는 상태 (트리거가 바꾼 변수/scriptstate, 버튼 트리거)
-  var live = { vars: {}, globalVars: {}, scriptstate: {}, chat: null };
+  var live = { vars: {}, globalVars: {}, scriptstate: {}, chat: null, globalLore: null, loreOf: null };
+  var pendingCacheReset = false; // 사용자가 상태를 바꿨다 → 다음 실행 전에 표시 캐시 비움
   var pendingManual = null; // 버튼 트리거 이름
   var lastVarsText = null; // 마지막으로 적용한 textarea 내용 (직접 수정 감지)
   var lastGvarsText = null;
@@ -826,7 +835,7 @@
     if (!modOk) return null;
     return {
       char: charOk ? c.triggerscript || c.triggers.concat(c.luaTriggers) : [],
-      module: flat(mods, 'triggerscript')
+      module: moduleTriggersOf(mods, 'triggerscript')
     };
   }
 
@@ -880,6 +889,7 @@
 
     // 변수 유지: textarea 를 직접 고쳤을 때만 초기값으로 되돌린다.
     // (그 외에는 지난 실행에서 트리거가 바꾼 값을 이어 쓴다)
+    RisuSim.setScriptCache($('featCache').checked);
     var persist = $('featPersist').checked;
     var varsText = $('vars').value;
     var gvarsText = $('globalVars').value;
@@ -892,6 +902,11 @@
       lastGvarsText = gvarsText;
     }
     if (!persist) live.scriptstate = {};
+    if (varsText !== lastVarsText || gvarsText !== lastGvarsText) pendingCacheReset = true;
+    if (pendingCacheReset) {
+      RisuSim.resetScriptCache();
+      pendingCacheReset = false;
+    }
 
     var manual = pendingManual;
     pendingManual = null;
@@ -902,6 +917,11 @@
     var curCharE = findEntry('character', selected.character);
     var curPresetE = findEntry('preset', selected.preset);
     var useCharE = curCharE && applied.character === curCharE.id ? curCharE : null;
+    // 트리거가 로어북을 고치면 다음 실행으로 이어진다 (변수 유지와 같이)
+    if (!persist || live.loreOf !== (useCharE && useCharE.id)) {
+      live.globalLore = useCharE && useCharE.globalLore ? JSON.parse(JSON.stringify(useCharE.globalLore)) : [];
+      live.loreOf = useCharE && useCharE.id;
+    }
 
     var cfg = {
       mode: $('mode').value,
@@ -925,6 +945,8 @@
             scenario: useCharE.character.scenario || '', exampleMessage: useCharE.character.exampleMessage || '' }
         : {},
       defaultVariables: useCharE ? useCharE.defaultVariables || '' : '',
+      charLowLevelAccess: !!(useCharE && useCharE.lowLevelAccess),
+      globalLore: live.globalLore,
       templateDefaultVariables: curPresetE && applied.preset === curPresetE.id ? curPresetE.templateDefaultVariables || '' : '',
       presetRegex: presetM,
       charRegex: charM,
@@ -956,6 +978,7 @@
     live.globalVars = result.globalVarsAfter || {};
     live.scriptstate = result.scriptstateAfter || {};
     live.chat = result.chatAfter || null;
+    if (result.globalLoreAfter) live.globalLore = result.globalLoreAfter;
 
     renderTrace(result, cfg);
     renderPreview(result, cfg);
@@ -1657,6 +1680,17 @@
     }
   }
 
+  // getModuleTriggers (modules.ts:472) — 각 트리거에 그 모듈의 lowLevelAccess 를 붙인다
+  function moduleTriggersOf(mods, key) {
+    var out = [];
+    mods.forEach(function (m) {
+      (m[key] || []).forEach(function (t) {
+        out.push(Object.assign({}, t, { lowLevelAccess: !!m.lowLevelAccess }));
+      });
+    });
+    return out;
+  }
+
   function flat(arr, key) {
     var out = [];
     arr.forEach(function (e) {
@@ -1724,6 +1758,7 @@
     });
     buildAssetUrls(urlSources);
 
+    pendingCacheReset = true; // modules.ts:584 모듈 구성이 바뀌면 ReloadGUIPointer
     renderTogglePanel();
     renderImportLists();
     if (shouldRun !== false) run().catch(function (e) { console.error(e); });
@@ -1805,13 +1840,15 @@
     return out;
   }
 
+  // Toggles.svelte:96 getGlobalChatVarNH — 없으면 '' 로 보여 줄 뿐 값을 만들지는 않는다
   function toggleValue(key) {
     var v = live.globalVars['toggle_' + key];
-    return v == null ? (live.globalVars['toggle_' + key] = '') : v;
+    return v == null || v === 'null' ? '' : String(v);
   }
 
   function setToggle(key, val, rerun) {
     live.globalVars['toggle_' + key] = String(val);
+    pendingCacheReset = true;
     syncVarsTextarea();
     if (rerun) run().catch(function (e) { console.error(e); });
   }
@@ -1819,13 +1856,16 @@
   function renderTogglePanel() {
     var host = $('toggleHost');
     var field = $('toggleField');
-    var src = [];
-    var ch = findEntry('character', selected.character);
-    if (ch && ch.toggles) src.push(ch.toggles);
+    // Toggles.svelte:71 — db.customPromptTemplateToggle + '\n' + getModuleToggles() + '\n' + char.customModuleToggle
+    var pr = findEntry('preset', selected.preset);
+    var presetToggle = pr && applied.preset === pr.id ? pr.toggles || '' : '';
+    var moduleToggles = ''; // modules.ts:495 getModuleToggles
     store.module.forEach(function (m) {
-      if (moduleChecked[m.id] && m.toggles) src.push(m.toggles);
+      if (moduleChecked[m.id] && m.toggles) moduleToggles += '\n' + m.toggles + '\n';
     });
-    var items = parseToggleSyntax(src.join('\n'));
+    var ch = findEntry('character', selected.character);
+    var charToggle = ch && applied.character === ch.id && typeof ch.toggles === 'string' ? ch.toggles : '';
+    var items = parseToggleSyntax(presetToggle + '\n' + moduleToggles + '\n' + charToggle);
     if (!items.length) {
       field.style.display = 'none';
       host.innerHTML = '';
@@ -1835,15 +1875,15 @@
 
     // group ~ groupEnd 사이를 children 으로 접는다 (Toggles.svelte 와 동일)
     var list = [];
-    var openGroup = null;
+    var groupOpen = false;
     items.forEach(function (t) {
       if (t.type === 'group') {
-        openGroup = { key: t.key, value: t.value, type: 'group', children: [] };
-        list.push(openGroup);
+        groupOpen = true;
+        list.push(t);
       } else if (t.type === 'groupEnd') {
-        openGroup = null;
-      } else if (openGroup) {
-        openGroup.children.push(t);
+        groupOpen = false;
+      } else if (groupOpen) {
+        list[list.length - 1].children.push(t);
       } else {
         list.push(t);
       }
@@ -1870,23 +1910,23 @@
       return '<input type="checkbox" data-tkey="' + escapeAttr(t.key) + '"' + (v === '1' ? ' checked' : '') + '>';
     }
 
-    function rowHtml(t) {
-      if (t.type === 'divider') return '<hr>';
-      if (t.type === 'caption') return '<div class="tg-caption">' + esc(t.value) + '</div>';
-      if (t.type === 'group') {
-        if (!t.children.length) return '';
-        return (
-          '<details><summary>' + esc(t.value || t.key) + '</summary><div>' +
-          t.children.map(rowHtml).join('') +
-          '</div></details>'
-        );
-      }
-      return (
-        '<label class="tg"><span>' + esc(t.value || t.key) + '</span>' + controlHtml(t) + '</label>'
-      );
+    // Toggles.svelte:107-170 의 분기 그대로 (자식 없는 group 은 원본도 체크박스로 그려진다)
+    function rowsHtml(items) {
+      return items.map(function (t, index) {
+        if (t.type === 'group' && t.children.length > 0) {
+          return '<details><summary>' + esc(t.value) + '</summary><div>' + rowsHtml(t.children) + '</div></details>';
+        }
+        if (t.type === 'caption') return '<div class="tg-caption">' + esc(t.value) + '</div>';
+        if (t.type === 'divider') {
+          var prev = items[index - 1];
+          if (index !== 0 && prev && prev.type === 'divider' && prev.value === t.value) return '';
+          return t.value ? '<div class="tg-divider"><span>' + esc(t.value) + '</span><hr></div>' : '<hr>';
+        }
+        return '<label class="tg"><span>' + esc(t.value) + '</span>' + controlHtml(t) + '</label>';
+      }).join('');
     }
 
-    host.innerHTML = list.map(rowHtml).join('');
+    host.innerHTML = rowsHtml(list);
   }
 
   function escapeAttr(v) {
@@ -2182,7 +2222,12 @@
 
   $('runBtn').addEventListener('click', function () { run().catch(function (e) { console.error(e); }); });
 
-  ['traceCbs', 'featTriggers', 'featLua', 'featPersist'].forEach(function (id) {
+  $('cacheClear').addEventListener('click', function () {
+    RisuSim.resetScriptCache();
+    run().catch(function (e) { console.error(e); });
+  });
+
+  ['traceCbs', 'featTriggers', 'featLua', 'featPersist', 'featCache'].forEach(function (id) {
     if (!$(id)) return;
     $(id).addEventListener('change', function () {
       run().catch(function (e) { console.error(e); });

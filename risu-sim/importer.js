@@ -1201,6 +1201,54 @@
       });
   }
 
+  /** characterCards.ts:1093 convertCharbook 의 항목 변환 부분 (character_book → char.globalLore) */
+  function convertCharbook(book) {
+    if (!book || !Array.isArray(book.entries)) return [];
+    var out = [];
+    book.entries.forEach(function (src) {
+      if (!src || typeof src !== 'object') return;
+      var b = JSON.parse(JSON.stringify(src));
+      var content = b.content;
+      if (b.use_regex && !(b.keys && b.keys[0] && String(b.keys[0]).startsWith('/'))) b.use_regex = false;
+      var ext = b.extensions || {};
+      if (ext.useProbability && ext.probability !== undefined && ext.probability !== 100) {
+        content = '@@probability ' + ext.probability + '\n' + content;
+        delete ext.useProbability; delete ext.probability;
+      }
+      if (ext.position === 4 && typeof ext.depth === 'number' && typeof ext.role === 'number') {
+        content = '@@depth ' + ext.depth + '\n@@role ' + ['system', 'user', 'assistant'][ext.role] + '\n' + content;
+        delete ext.position; delete ext.depth; delete ext.role;
+      }
+      if (typeof ext.selectiveLogic === 'number' && b.secondary_keys && b.secondary_keys.length > 0) {
+        switch (ext.selectiveLogic) {
+          case 1: b.selective = false; content = '@@exclude_keys_all ' + b.secondary_keys.join(',') + '\n' + content; break;
+          case 2: b.selective = false; b.secondary_keys.forEach(function (k) { content = '@@exclude_keys ' + k + '\n' + content; }); break;
+          case 3: b.selective = false; b.secondary_keys.forEach(function (k) { content = '@@additional_keys ' + k + '\n' + content; }); break;
+        }
+      }
+      if (typeof ext.delay === 'number' && ext.delay > 0) { content = '@@activate_only_after ' + ext.delay + '\n' + content; delete ext.delay; }
+      if (ext.match_whole_words === true) { content = '@@match_full_word\n' + content; delete ext.match_whole_words; }
+      if (ext.match_whole_words === false) { content = '@@match_partial_word\n' + content; delete ext.match_whole_words; }
+      var e2 = Object.assign({}, ext, { risu_case_sensitive: b.case_sensitive });
+      out.push({
+        key: (b.keys || []).join(', '),
+        secondkey: b.secondary_keys ? b.secondary_keys.join(', ') : '',
+        insertorder: b.insertion_order,
+        comment: b.name != null ? b.name : b.comment != null ? b.comment : '',
+        content: content,
+        mode: b.mode != null ? b.mode : 'normal',
+        alwaysActive: b.constant != null ? b.constant : false,
+        selective: b.selective != null ? b.selective : false,
+        extentions: e2,
+        activationPercent: b.extensions ? b.extensions.risu_activationPercent : undefined,
+        loreCache: (b.extensions && b.extensions.risu_loreCache) || null,
+        useRegex: b.use_regex != null ? b.use_regex : false,
+        folder: b.folder
+      });
+    });
+    return out;
+  }
+
   /** 스크립트 배열에서 Lua 훅만 분리 (effect[0].type === 'triggerlua') */
   function splitTriggers(list) {
     var triggers = [];
@@ -1361,6 +1409,8 @@
       lorebook: [],
       assets: [],
       templateDefaultVariables: typeof preset.templateDefaultVariables === 'string' ? preset.templateDefaultVariables : '',
+      // db.customPromptTemplateToggle (database.svelte.ts:2258) — 사이드바 토글 맨 앞
+      toggles: typeof preset.customPromptTemplateToggle === 'string' ? preset.customPromptTemplateToggle : '',
       vars: vars,
       preset: preset,
       warnings: warnings
@@ -1475,6 +1525,8 @@
       backgroundEmbedding: typeof module.backgroundEmbedding === 'string' ? module.backgroundEmbedding : '',
       hideIcon: !!module.hideIcon,
       toggles: typeof module.customModuleToggle === 'string' ? module.customModuleToggle : '',
+      // getModuleTriggers (modules.ts:473) — 모듈 트리거는 module.lowLevelAccess 를 따른다
+      lowLevelAccess: !!module.lowLevelAccess,
       module: module,
       warnings: warnings
     };
@@ -1571,7 +1623,7 @@
         var md = inner.module;
         // 원본: md.trigger ?? [] — 모듈에 트리거가 없으면 카드 트리거도 비운다
         normalized.triggers = Array.isArray(md.trigger) ? md.trigger : [];
-        if (Array.isArray(md.regex)) normalized.customScripts = md.regex;
+        normalized.customScripts = Array.isArray(md.regex) ? md.regex : []; // 원본: md.regex ?? []
         if (Array.isArray(md.lorebook) && md.lorebook.length) {
           normalized.lorebookOverride = md.lorebook;
         }
@@ -1675,6 +1727,10 @@
       // 원본 char.defaultVariables 원문 — getvar 의 기본값(scriptstate 에 없을 때만)
       defaultVariables: typeof n.defaultVariables === 'string' ? n.defaultVariables : '',
       toggles: typeof n.toggles === 'string' ? n.toggles : '',
+      // triggers.ts:1073 — 캐릭터 트리거는 전부 char.lowLevelAccess 로 덮어쓴다
+      lowLevelAccess: !!n.lowLevelAccess,
+      // char.globalLore (트리거 로어북 effect 가 읽고 쓴다)
+      globalLore: meta && meta.lorebookOverride ? meta.lorebookOverride : convertCharbook(n.character_book),
       character: {
         name: n.name,
         firstMessage: n.firstMessage,

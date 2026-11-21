@@ -92,14 +92,53 @@
   // 봇 트리거(전체) + Lua 트리거 + 모듈 트리거.
   // 원본은 char.triggerscript(일반·Lua 섞인 원래 순서) 다음에 모듈 트리거.
   // config.charTriggerscript 가 있으면 원래 순서 그대로 쓴다 (importer 가 넣어줌).
-  function allTriggers(config) {
-    var charPart = Array.isArray(config.charTriggerscript)
+  // triggers.ts:1081 — char.triggerscript 다음에 getModuleTriggers()
+  function charTriggerList(config) {
+    return Array.isArray(config.charTriggerscript)
       ? config.charTriggerscript
       : [].concat(config.charTriggers || []).concat(config.charLua || []);
-    var modPart = Array.isArray(config.moduleTriggerscript)
+  }
+  function moduleTriggerList(config) {
+    return Array.isArray(config.moduleTriggerscript)
       ? config.moduleTriggerscript
       : [].concat(config.moduleTriggers || []).concat(config.moduleLua || []);
-    return charPart.concat(modPart);
+  }
+  function triggerOpts(config, ctx, extra) {
+    return Object.assign({
+      charTriggers: charTriggerList(config),
+      moduleTriggers: moduleTriggerList(config),
+      charLowLevelAccess: !!config.charLowLevelAccess,
+      globalLore: config.globalLore || [],
+      chat: ctx.chat,
+      // 원본: 트리거가 변수를 바꾸면 ReloadGUIPointer → resetScriptCache() (stores.svelte.ts:184)
+      onReloadGUI: resetScriptCache
+    }, extra || {});
+  }
+
+  // ---- 표시 결과 캐시 (scripts.ts:68-97 processScriptCache) ----
+  // 키 = CBS 를 거친 본문 + 모드 + 그 모드 스크립트의 in/out/flag + chatID. 변수 값은 키에 없다.
+  // 그래서 같은 본문이면 정규식 out 안의 {{getvar}} 가 바뀌어도 이전 결과가 그대로 나온다(원본 동작).
+  // 비우는 때: 트리거가 변수를 바꿈 · Lua reloadDisplay() · 모듈 구성 변경 · 채팅 전환 (ReloadGUIPointer)
+  var scriptCache = new Map();
+  var scriptCacheEnabled = true;
+  function resetScriptCache() {
+    scriptCache = new Map();
+  }
+  function scriptCacheKey(scripts, data, mode, chatID, cbsConditions, ctx) {
+    var hash = data + '|||' + mode + '|||';
+    for (var i = 0; i < scripts.length; i++) {
+      var script = scripts[i];
+      if (script.type !== mode) continue;
+      var input = script.flag && String(script.flag).indexOf('<cbs>') >= 0
+        ? cbsParse(script.in, ctx, { chatID: chatID, cbsConditions: cbsConditions })
+        : script.in;
+      hash += input + '|||' + script.out + chatID + '|||' + (script.flag == null ? '' : script.flag) + '|||' + (script.ableFlag ? 1 : 0);
+    }
+    return hash;
+  }
+  function cacheScript(hash, result) {
+    scriptCache.set(hash, result);
+    if (scriptCache.size > 1000) scriptCache.delete(scriptCache.keys().next().value);
   }
 
   // scripts.ts:296-330 — 그대로 (빈 meta 도 actions 에 들어간다, order 는 parseInt 그대로)
@@ -285,7 +324,7 @@
     if (config.luaEnabled === false) {
       trace.push({ stage: '① Lua', detail: '사용 안 함 (기능 토글)', skipped: true });
     } else if (luaMode && G.RisuLua) {
-      var luaTriggers = allTriggers(config);
+      var luaTriggers = charTriggerList(config).concat(moduleTriggerList(config));
       var beforeLua = data;
       try {
         var luaRes = await G.RisuLua.runEditHooks(luaTriggers, luaMode, data, ctx, { index: chatID });
@@ -321,16 +360,10 @@
     } else if (mode === 'editdisplay' && G.RisuTrigger) {
       var beforeTrig = data;
       try {
-        var runner = G.RisuTrigger.create(ctx, {
-          charTriggers: allTriggers(config),
-          moduleTriggers: [],
-          chat: ctx.chat,
-          displayMode: true,
-          displayData: data
-        });
+        var runner = G.RisuTrigger.create(ctx, triggerOpts(config, ctx, { displayMode: true, displayData: data }));
         var tr = await runner.run('display');
+        if (tr.error) throw new Error(tr.error); // 원본: scripts.ts:116 catch → console.error, data 유지
         if (tr.displayData != null) data = tr.displayData;
-        if (tr.chat) ctx.chat = tr.chat;
         var fired = tr.trace.filter(function (x) {
           return !x.skipped;
         }).length;
@@ -361,6 +394,18 @@
       .concat(config.presetRegex || [])
       .concat(char.customscript || [])
       .concat(config.moduleRegex || []);
+
+    var cacheKey = scriptCacheKey(scripts, data, mode, chatID, cbsConditions, ctx);
+    var cached = scriptCacheEnabled ? scriptCache.get(cacheKey) : undefined;
+    // 원본은 캐시 적중이면 여기서 바로 돌려준다(정규식·동적 에셋 생략). 무엇이 가려졌는지 보이도록
+    // 시뮬레이터는 정규식을 한 번 더 돌려 비교만 하고, 그 부작용(@@inject 등)은 되돌린다.
+    var chatSnap = cached ? JSON.parse(JSON.stringify(ctx.chat || [])) : null;
+
+    if (scripts.length === 0) {
+      if (scriptCacheEnabled) cacheScript(cacheKey, data);
+      trace.push({ stage: '⑤ 정규식', detail: '스크립트 없음 — 원본은 여기서 끝 (동적 에셋도 건너뜀)', before: data, after: data, skipped: true });
+      return { data: data, trace: trace };
+    }
 
     var parsed = scripts.map(parseScriptMeta);
     var orderChanged = parsed.some(function (p) {
@@ -396,6 +441,24 @@
       entries.push(entry);
     }
 
+    var fresh = null;
+    if (cached) {
+      fresh = data;
+      ctx.chat = chatSnap;
+      data = cached;
+      trace.push({
+        stage: '⑤ 정규식 — 캐시 적중',
+        detail: 'processScriptCache 적중 (scripts.ts:136) — 원본은 정규식·동적 에셋을 다시 돌리지 않고 이전 결과를 씁니다' +
+          (fresh !== cached ? ' ⚠ 지금 다시 돌리면 결과가 다릅니다 (아래 표는 비교용 재실행)' : ' · 다시 돌려도 같은 결과'),
+        cacheHit: true,
+        cacheStale: fresh !== cached,
+        before: fresh,
+        after: cached,
+        entries: entries
+      });
+      return { data: data, trace: trace, cacheHit: true };
+    }
+
     trace.push({
       stage: '⑤ 정규식',
       detail: 'presetRegex → char.customscript → module regex',
@@ -415,6 +478,7 @@
       trace.push({ stage: '⑥ 동적 에셋', detail: 'asset-runtime.js 미로드', before: data, after: data, skipped: true });
     }
 
+    if (scriptCacheEnabled) cacheScript(cacheKey, data); // scripts.ts:384
     return { data: data, trace: trace };
   }
 
@@ -1053,6 +1117,8 @@
       moduleTriggers: config.moduleTriggers || [],
       charTriggerscript: config.charTriggerscript,
       moduleTriggerscript: config.moduleTriggerscript,
+      charLowLevelAccess: !!config.charLowLevelAccess,
+      globalLore: config.globalLore || [],
       assets: config.assets || null,
       triggersEnabled: config.triggersEnabled !== false,
       luaEnabled: config.luaEnabled !== false
@@ -1084,10 +1150,11 @@
 
     async function runTriggerPass(passMode, arg) {
       if (!G.RisuTrigger) return null;
-      var runner = G.RisuTrigger.create(ctx, { charTriggers: allTriggers(pipeCfg), moduleTriggers: [], chat: ctx.chat });
+      var runner = G.RisuTrigger.create(ctx, triggerOpts(pipeCfg, ctx));
       var r = await runner.run(passMode, arg);
       ctx.chat = r.chat;
       if (r.scriptstate) ctx.scriptstate = r.scriptstate;
+      if (r.lorebook) pipeCfg.globalLore = r.lorebook;
       return r;
     }
 
@@ -1219,6 +1286,7 @@
         return o;
       })(),
       globalVarsAfter: ctx.globalVars,
+      globalLoreAfter: pipeCfg.globalLore,
       chatAfter: ctx.chat,
       scriptstateAfter: ctx.scriptstate || {},
       unsupported: Array.from(ctx.unsupported),
@@ -1289,6 +1357,14 @@
     run: run,
     renderDisplay: renderDisplay,
     renderBackground: renderBackground,
+    resetScriptCache: resetScriptCache,
+    setScriptCache: function (on) {
+      scriptCacheEnabled = !!on;
+      if (!on) resetScriptCache();
+    },
+    scriptCacheSize: function () {
+      return scriptCache.size;
+    },
     encodeStyle: encodeStyle,
     trimMarkdown: trimMarkdown,
     setLanguage: function (l) {

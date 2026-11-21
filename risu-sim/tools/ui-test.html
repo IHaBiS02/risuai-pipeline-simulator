@@ -355,6 +355,13 @@
     ok('select 토글 값 반영', JSON.parse(d.getElementById('globalVars').value).toggle_tone === '1',
       d.getElementById('globalVars').value.slice(0, 160));
 
+    // 프리셋 → 모듈 → 캐릭터 토글이 한 패널에 원본 순서로 (Toggles.svelte:71)
+    var tkeys = Array.prototype.map.call(d.querySelectorAll('#toggleHost [data-tkey]'), function (el) { return el.getAttribute('data-tkey'); });
+    ok('프리셋 토글도 표시', tkeys.indexOf('ptog') >= 0 && tkeys.indexOf('pmode') >= 0, tkeys.join(','));
+    ok('프리셋 토글이 캐릭터 토글보다 먼저', tkeys.indexOf('ptog') >= 0 && tkeys.indexOf('ptog') < tkeys.indexOf('cot'), tkeys.join(','));
+    ok('토글 안 건드리면 toggle_* 값을 만들지 않음', !('toggle_ptog' in JSON.parse(d.getElementById('globalVars').value || '{}')),
+      d.getElementById('globalVars').value.slice(0, 160));
+
     // 버튼 트리거: <button risu-trigger="open"> → 발동 시 revealed=1
     ok('버튼 트리거 전에는 OPENED 없음', d.getElementById('htmlOut').textContent.indexOf('x-risu-revealed') < 0);
     var btn = d.querySelector('#preview [risu-trigger]');
@@ -450,6 +457,27 @@
       charLua: [lua("counter = (counter or 0) + 1  listenEdit('editDisplay', function(id, v) return v .. counter end)")]
     });
     eq('같은 코드면 mode 엔진 재사용 (전역 유지 X — 코드 재실행 안 함)', r4.finalText + ',' + r5.finalText, 'C1,C1');
+
+    // ---------- 원본 runTrigger + Lua lowLevelAccess ----------
+    var llTrig = function () { return [{ comment: 'x', type: 'start', conditions: [], effect: [{ type: 'extractRegex', value: 'HP 42', regex: '(\\d+)', flags: '', result: '$1', inputVar: 'hp' }] }]; };
+    var t1 = await w.RisuSim.run({ mode: 'editprocess', input: 'a', chatID: 0, chat: [{ role: 'char', data: 'a' }], charTriggers: llTrig() });
+    var t2 = await w.RisuSim.run({ mode: 'editprocess', input: 'a', chatID: 0, chat: [{ role: 'char', data: 'a' }], charTriggers: llTrig(), charLowLevelAccess: true });
+    eq('lowLevelAccess 없으면 extractRegex 무시 / 있으면 실행', String(t1.varsAfter.hp) + ',' + t2.varsAfter.hp, 'undefined,42');
+    var t3 = await w.RisuSim.run({ mode: 'editprocess', input: 'a', chatID: 0, chat: [{ role: 'char', data: 'a' }],
+      charTriggers: [{ comment: 'l', type: 'start', conditions: [], effect: [{ type: 'triggerlua', code: "function onStart(id) setChatVar(id, 'lua', 'ok') end" }] }] });
+    eq('트리거 triggerlua → 원본 runScripted 경로로 Lua 실행', t3.varsAfter.lua, 'ok');
+
+    // ---------- 표시 캐시 ----------
+    w.RisuSim.resetScriptCache();
+    var pr = [{ comment: 'v', in: 'X', out: '{{getvar::hp}}', type: 'editdisplay' }];
+    var c1 = await w.RisuSim.run({ mode: 'editdisplay', input: 'X', markdown: false, presetRegex: pr, vars: { hp: '1' } });
+    var c2 = await w.RisuSim.run({ mode: 'editdisplay', input: 'X', markdown: false, presetRegex: pr, vars: { hp: '2' } });
+    eq('캐시 적중 → 이전 결과 (원본 processScriptCache)', c1.finalText + ',' + c2.finalText, '1,1');
+    d.getElementById('cacheClear').click();
+    await sleep(300);
+    var c3 = await w.RisuSim.run({ mode: 'editdisplay', input: 'X', markdown: false, presetRegex: pr, vars: { hp: '2' } });
+    eq('캐시 비우기 버튼', c3.finalText, '2');
+    ok('표시 캐시 스위치 존재(기본 켜짐)', d.getElementById('featCache') && d.getElementById('featCache').checked);
   }
 })();
 </script>

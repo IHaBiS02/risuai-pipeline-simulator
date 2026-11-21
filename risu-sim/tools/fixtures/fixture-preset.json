@@ -20,6 +20,7 @@
     }
   ],
   "templateDefaultVariables": "hp=77\ntoggle_flag=1",
+  "customPromptTemplateToggle": "ptog=프리셋 토글\npmode=프리셋 모드=select=A,B",
   "temperature": 80,
   "promptTemplate": [
     {
