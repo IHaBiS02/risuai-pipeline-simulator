@@ -12,7 +12,8 @@ RisuAI 의 **메시지 처리 파이프라인**을 코드 레벨로 분석하고
 - **트리거** VM — 조건 평가, indent 인터프리터, display/request allowlist
 - **동적 에셋** — OpenAI 호환 `/embeddings` 로 에셋 이름 유사도 매칭
 - **파일 불러오기** — `.risup` 프리셋 / `.charx` 봇 카드 / `.module` 모듈을 그대로 읽어서 적용
-- **After 렌더** — 트레이스의 각 단계 결과를 HTML·에셋·카드 CSS 까지 적용해 채팅처럼 표시
+- **보기 모드 2종** — 결과를 **실제 이미지**(카드 CSS·에셋 적용) 또는 **HTML 코드**(최종 소스)로
+- **After 렌더** — 트레이스의 각 단계 결과도 같은 보기 모드로 표시
 
 빌드도, 서버도, 패키지 설치도 필요 없습니다. `risu-sim/index.html` 을 열면 바로 동작합니다.
 
@@ -61,7 +62,7 @@ python3 -m http.server 8080
 cd risu-sim && node test.js
 # → 114 passed, 0 failed
 
-# 브라우저 UI 통합 테스트 (파일 주입 + 클릭 77개 항목)
+# 브라우저 UI 통합 테스트 (파일 주입 + 클릭 84개 항목)
 python3 -m http.server 8901 &
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
@@ -90,6 +91,10 @@ http://localhost:8080/?asset=1&assetUrl=http://127.0.0.1:8899/v1&assetModel=mock
 **HTML 카드 UI 봇** — `{{#when}}` 중첩 조건 + charx 안의 이미지로 실제 화면과 같게
 
 ![카드 UI](risu-sim/shot-cardui.png)
+
+같은 결과를 **HTML 코드** 모드로 보면 최종 HTML 소스가 나옵니다 (보기 스위치로 전환)
+
+![HTML 코드 모드](risu-sim/shot-htmlmode.png)
 
 **After 렌더** — 각 단계의 결과를 자산·카드 CSS 까지 적용해 채팅처럼
 

@@ -61,6 +61,12 @@
       d.getElementById('runBtn').click();
       await sleep(2500);
 
+      var view = q.get('view');
+      if (view === 'html') {
+        var vb = d.querySelector('#viewSeg button[data-view="html"]');
+        if (vb) vb.click();
+        await sleep(600);
+      }
       if (tab !== 'trace') {
         var btn = d.querySelector('.tabs button[data-pane="' + tab + '"]');
         if (btn) btn.click();

@@ -203,8 +203,12 @@
       'text=' + JSON.stringify(d.getElementById('chatAvatar').textContent) +
         ' bg=' + d.getElementById('chatAvatar').style.backgroundImage);
 
-    // ---------- After 렌더 ----------
-    eq('After 렌더 토글 기본 켜짐', d.getElementById('traceRender').checked, true);
+    // ---------- 보기 모드 (실제 이미지 / HTML 코드) ----------
+    function viewBtn(mode) { return d.querySelector('#viewSeg button[data-view="' + mode + '"]'); }
+    ok('보기 모드 기본 = 실제 이미지', viewBtn('image').classList.contains('active'),
+      d.getElementById('viewSeg').innerHTML.slice(0, 120));
+    ok('실제 이미지 모드에서 프리뷰 표시', !d.getElementById('previewWrap').classList.contains('hide'));
+    ok('실제 이미지 모드에서 HTML 숨김', !d.getElementById('htmlOut').classList.contains('show'));
     var rendered = d.querySelectorAll('#pane-trace .rendered');
     ok('After 렌더 블록이 생성됨', rendered.length > 0, 'count=' + rendered.length);
     ok('소스 보기 토글 존재', d.querySelectorAll('#pane-trace details.srcbox').length > 0,
@@ -225,18 +229,22 @@
     ok('에셋 이름 표시', /smile_happy\.png/.test(all2), all2.slice(0, 400));
     ok('에셋 퍼지 매칭(angryy→angry.png)', /angry\.png/.test(all2), all2.slice(0, 500));
 
-    // 토글 끄기
-    var tog = d.getElementById('traceRender');
-    tog.checked = false;
-    tog.dispatchEvent(new w.Event('change', { bubbles: true }));
+    // HTML 코드 모드로 전환
+    viewBtn('html').click();
     await sleep(1500);
-    eq('토글 끄면 렌더 블록 없음', d.querySelectorAll('#pane-trace .rendered').length, 0);
-    ok('토글 꺼도 after 소스는 남음', /diff-after/.test(d.getElementById('pane-trace').innerHTML));
+    ok('HTML 모드 active', viewBtn('html').classList.contains('active'));
+    ok('HTML 모드에서 프리뷰 숨김', d.getElementById('previewWrap').classList.contains('hide'));
+    ok('HTML 모드에서 코드 표시', d.getElementById('htmlOut').classList.contains('show'));
+    ok('코드에 최종 HTML 이 들어있음', d.getElementById('htmlOut').textContent.length > 20,
+      d.getElementById('htmlOut').textContent.slice(0, 120));
+    eq('HTML 모드에서는 After 렌더 블록 없음', d.querySelectorAll('#pane-trace .rendered').length, 0);
+    ok('HTML 모드에서도 after 소스는 남음', /diff-after/.test(d.getElementById('pane-trace').innerHTML));
 
-    tog.checked = true;
-    tog.dispatchEvent(new w.Event('change', { bubbles: true }));
+    // 실제 이미지 모드로 복귀
+    viewBtn('image').click();
     await sleep(1500);
-    ok('다시 켜면 복구', d.querySelectorAll('#pane-trace .rendered').length > 0);
+    ok('이미지 모드 복귀 시 렌더 블록 생성', d.querySelectorAll('#pane-trace .rendered').length > 0);
+    ok('이미지 모드 복귀 시 프리뷰 표시', !d.getElementById('previewWrap').classList.contains('hide'));
 
     // ---------- 페이지 아무 데나 드롭 (전역 라우팅) ----------
     var beforeChar = items('character');

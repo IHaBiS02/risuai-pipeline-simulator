@@ -190,6 +190,18 @@
     margin-left: auto; padding: 6px 2px 6px 10px; font-size: 12px; color: var(--muted);
   }
   .tabopt2 { padding: 6px 2px; font-size: 12px; color: var(--muted); }
+  .seg-lab { padding-right: 0; font-size: 11.5px; letter-spacing: .04em; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    padding: 4px 10px; font: inherit; font-size: 12px; border-radius: 0;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button:hover { background: rgba(255, 255, 255, .04); color: var(--text); }
+  .seg button.active { background: rgba(92, 200, 255, .16); color: var(--accent); font-weight: 600; }
+  .htmlview { display: none; }
+  .htmlview.show { display: block; }
+  #previewWrap.hide { display: none; }
 
   .note {
     margin-top: 14px; padding: 11px 13px; border-radius: 8px;
@@ -483,13 +495,14 @@
 
     <div class="tabs">
       <button data-pane="trace" class="active">트레이스</button>
-      <button data-pane="preview">렌더 프리뷰</button>
+      <button data-pane="preview">결과</button>
       <button data-pane="css">스코프된 CSS</button>
-      <button data-pane="html">최종 HTML</button>
       <button data-pane="vars">변수</button>
-      <label class="chk tabopt" title="트레이스의 after 를 자산·카드 CSS 까지 적용해 렌더링합니다">
-        <input type="checkbox" id="traceRender" checked> After 렌더
-      </label>
+      <span class="tabopt seg-lab">보기</span>
+      <div class="seg" id="viewSeg">
+        <button data-view="image" class="active" title="에셋 이미지·카드 CSS 를 적용해 실제 채팅처럼">실제 이미지</button>
+        <button data-view="html" title="최종 HTML 소스 코드로">HTML 코드</button>
+      </div>
       <label class="chk tabopt2" title="중간 단계에 남은 {{char}} 같은 CBS 를 미리보기용으로 한 번 더 전개합니다">
         <input type="checkbox" id="traceCbs" checked> CBS 전개
       </label>
@@ -508,9 +521,9 @@
           </div>
         </div>
       </div>
+      <pre id="htmlOut" class="htmlview"></pre>
     </div>
     <div class="pane" id="pane-css"><pre id="cssOut"></pre></div>
-    <div class="pane" id="pane-html"><pre id="htmlOut"></pre></div>
     <div class="pane" id="pane-vars"><pre id="varsOut"></pre></div>
   </div>
 </main>
@@ -642,6 +655,36 @@
     return out;
   }
 
+  // ---- 보기 모드: 'image' (실제 이미지 렌더) | 'html' (최종 HTML 코드) ----
+  var VIEW_LS_KEY = 'risusim.view';
+  var viewMode = 'image';
+  try {
+    var savedView = localStorage.getItem(VIEW_LS_KEY);
+    if (savedView === 'html' || savedView === 'image') viewMode = savedView;
+  } catch (e) {
+    /* ignore */
+  }
+
+  function applyViewMode() {
+    var isImage = viewMode === 'image';
+    $('previewWrap').classList.toggle('hide', !isImage);
+    $('htmlOut').classList.toggle('show', !isImage);
+    document.querySelectorAll('#viewSeg button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.view === viewMode);
+    });
+    try {
+      localStorage.setItem(VIEW_LS_KEY, viewMode);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function setViewMode(m) {
+    if (m !== 'image' && m !== 'html') return;
+    viewMode = m;
+    applyViewMode();
+  }
+
   // 레이어 라벨을 붙이기 위해 원본 배열을 그대로 넘기고, 엔진은 객체 참조로 구분
   async function run() {
     var preset = readJson($('presetRegex'), $('presetRegexErr'), []);
@@ -738,7 +781,7 @@
   var afterSeq = 0;
   function afterBlock(text, cfg, label) {
     var raw = '<pre class="diff-after">' + esc(clip(text)) + '</pre>';
-    if (!$('traceRender').checked || text == null || text === '') return raw;
+    if (viewMode !== 'image' || text == null || text === '') return raw;
     var str = String(text);
     if (str.length > 40000) {
       return '<div class="rendered-note">After 렌더 생략 — 너무 깁니다 (' + str.length + '자)</div>' + raw;
@@ -1146,8 +1189,14 @@
       if (!data) return;
       Object.keys(data).forEach(function (k) {
         var a = data[k];
-        if (!a || !a.b64 || seen.indexOf(a) >= 0) return;
+        if (!a || seen.indexOf(a) >= 0) return;
         seen.push(a);
+        // data: / https: 는 이미 URL 이다
+        if (a.url) {
+          assetUrls[k] = a.url;
+          return;
+        }
+        if (!a.b64) return;
         try {
           var url = URL.createObjectURL(new Blob([b64ToBytes(a.b64)], { type: a.mime || 'application/octet-stream' }));
           assetUrls[k] = url;
@@ -1466,15 +1515,18 @@
     }
   }
 
+  applyViewMode();
   renderImportLists();
 
   // ---- 이벤트 ----
-  document.querySelectorAll('.tabs button').forEach(function (btn) {
+  // [data-pane] 만 — 보기 전환(.seg button)은 탭이 아니므로 제외
+  document.querySelectorAll('.tabs button[data-pane]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      document.querySelectorAll('.tabs button').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tabs button[data-pane]').forEach(function (b) { b.classList.remove('active'); });
       document.querySelectorAll('.pane').forEach(function (p) { p.classList.remove('active'); });
       btn.classList.add('active');
-      $('pane-' + btn.dataset.pane).classList.add('active');
+      var pane = $('pane-' + btn.dataset.pane);
+      if (pane) pane.classList.add('active');
     });
   });
 
@@ -1520,8 +1572,13 @@
 
   $('runBtn').addEventListener('click', function () { run().catch(function (e) { console.error(e); }); });
 
-  ['traceRender', 'traceCbs'].forEach(function (id) {
-    $(id).addEventListener('change', function () {
+  $('traceCbs').addEventListener('change', function () {
+    run().catch(function (e) { console.error(e); });
+  });
+
+  document.querySelectorAll('#viewSeg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      setViewMode(b.dataset.view);
       run().catch(function (e) { console.error(e); });
     });
   });

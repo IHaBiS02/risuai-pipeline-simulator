@@ -707,16 +707,22 @@
   }
 
   // ==================================================================
-  // 5-b. charx 안의 이미지 에셋 추출
-  //   스펙: assets/{type}/images/*, 참조는 data.assets[].uri = 'embeded://<path>'
-  //   RisuAI 는 getFileSrc 로 실제 파일을 읽어 <img src> 로 넣는다.
-  //   여기서는 zip 에서 바이트를 꺼내 base64 로 들고 있다가 UI 에서 blob: URL 로 만든다.
+  // 5-b. 에셋 이미지 수집
+  //   CCv3 스펙의 asset.uri 는 여러 형태가 올 수 있다:
+  //     embeded://path      → CHARX zip 안의 파일
+  //     __asset:path        → PNG 의 chara-ext-asset_:<path> tEXt 청크 (base64)
+  //     data:image/png;base64,...  → 그대로 쓰면 됨
+  //     https://...         → 그대로 쓰면 됨 (브라우저가 로드)
+  //     ccdefault:          → 카드 이미지 자체 (CHARX 아이콘 / PNG 파일)
+  //   RisuAI 는 getFileSrc 로 이걸 전부 blob:/URL 로 바꿔 <img> 에 넣는다.
   // ==================================================================
 
-  var IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|avif|bmp|apng)$/i;
-  var MAX_ASSET_BYTES = 4 * 1024 * 1024; // 파일 하나
-  var MAX_ASSET_TOTAL = 16 * 1024 * 1024; // 전체
-  var MAX_ASSET_COUNT = 64;
+  var IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|avif|bmp|apng|svg)$/i;
+  var ASSET_LIMITS = {
+    file: 8 * 1024 * 1024, // 파일 하나
+    total: 48 * 1024 * 1024, // 전체
+    count: 200
+  };
 
   function mimeOf(name) {
     var m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
@@ -728,7 +734,8 @@
     if (ext === 'avif') return 'image/avif';
     if (ext === 'bmp') return 'image/bmp';
     if (ext === 'svg') return 'image/svg+xml';
-    if (ext === 'mp4' || ext === 'webm') return 'video/' + ext;
+    if (ext === 'mp4') return 'video/mp4';
+    if (ext === 'webm') return 'video/webm';
     if (ext === 'mp3') return 'audio/mpeg';
     if (ext === 'ogg') return 'audio/ogg';
     if (ext === 'wav') return 'audio/wav';
@@ -750,82 +757,201 @@
     return '';
   }
 
-  /** zip 엔트리들에서 이미지/미디어를 뽑아 { nameLc: {mime, b64} } 로 만든다 */
-  function extractCharxAssets(zip, cardData, warnings) {
-    var out = {};
-    var total = 0;
-    var skipped = 0;
-
-    // data.assets 의 embeded:// 경로 → 에셋 이름
-    var uriToName = {};
-    var iconNames = {};
-    var list = (cardData && Array.isArray(cardData.assets) && cardData.assets) || [];
-    for (var i = 0; i < list.length; i++) {
-      var a = list[i];
-      if (!a || typeof a !== 'object') continue;
-      var uri = String(a.uri || '');
-      if (uri.indexOf('embeded://') === 0) {
-        uriToName[uri.slice('embeded://'.length)] = String(a.name || '');
+  function newAssetBag(warnings) {
+    return {
+      map: {},
+      total: 0,
+      count: 0,
+      skipped: 0,
+      /** @param {string} name @param {Uint8Array} bytes @param {string} path */
+      addBytes: function (name, bytes, path) {
+        var key = String(name || path || '').toLocaleLowerCase();
+        if (!key) return;
+        if (!bytes || !bytes.length) return;
+        if (bytes.length > ASSET_LIMITS.file || this.count >= ASSET_LIMITS.count || this.total + bytes.length > ASSET_LIMITS.total) {
+          this.skipped++;
+          return;
+        }
+        this.total += bytes.length;
+        this.count++;
+        var rec = { mime: mimeOf(path || name), b64: bytesToB64(bytes), path: path || '', icon: false };
+        if (this.map[key] == null) this.map[key] = rec;
+        if (path && this.map[String(path).toLocaleLowerCase()] == null) {
+          this.map[String(path).toLocaleLowerCase()] = rec;
+        }
+      },
+      /** data: / https: 처럼 이미 URL 인 것 */
+      addUrl: function (name, url, path) {
+        var key = String(name || '').toLocaleLowerCase();
+        if (!key || !url) return;
+        var rec = { url: url, mime: mimeOf(path || name), path: path || '', icon: false };
+        if (this.map[key] == null) this.map[key] = rec;
       }
-      if (a.type === 'icon') iconNames[String(a.name || '').toLocaleLowerCase()] = true;
+    };
+  }
+
+  /** 카드의 asset 목록에서 (이름, uri) 쌍을 뽑는다. v3 data.assets + risuai 확장 둘 다. */
+  function assetPairs(cardData) {
+    var out = [];
+    var seen = {};
+    function push(name, uri, type) {
+      if (!name || !uri) return;
+      var k = String(name).toLocaleLowerCase() + '|' + uri;
+      if (seen[k]) return;
+      seen[k] = 1;
+      out.push({ name: String(name), uri: String(uri), type: type || '' });
     }
 
+    if (cardData && Array.isArray(cardData.assets)) {
+      for (var i = 0; i < cardData.assets.length; i++) {
+        var a = cardData.assets[i];
+        if (!a || typeof a !== 'object') continue;
+        push(a.name, a.uri, a.type);
+      }
+    }
+    if (cardData && cardData.extensions && cardData.extensions.risuai) {
+      var r = cardData.extensions.risuai;
+      if (Array.isArray(r.additionalAssets)) {
+        for (var j = 0; j < r.additionalAssets.length; j++) {
+          var aa = r.additionalAssets[j];
+          if (!aa) continue;
+          if (Array.isArray(aa)) push(aa[0], aa[1], 'x-risu-asset');
+          else if (typeof aa === 'object') push(aa.name, aa.uri || aa.data, 'x-risu-asset');
+        }
+      }
+      if (Array.isArray(r.emotions)) {
+        for (var k2 = 0; k2 < r.emotions.length; k2++) {
+          var em = r.emotions[k2];
+          if (Array.isArray(em)) push(em[0], em[1], 'emotion');
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * uri 하나를 실제 바이트/URL 로 푼다.
+   * ctx: { zip, pngChunks, bag }
+   */
+  function resolveAssetUri(pair, ctx) {
+    var uri = pair.uri;
+    var bag = ctx.bag;
+
+    // data: (base64) → 그대로 URL 로
+    if (/^data:/i.test(uri)) {
+      bag.addUrl(pair.name, uri, pair.name);
+      return Promise.resolve();
+    }
+    // 원격 URL → 그대로 (브라우저가 로드)
+    if (/^https?:\/\//i.test(uri)) {
+      bag.addUrl(pair.name, uri, pair.name);
+      return Promise.resolve();
+    }
+    // CHARX 내장 파일
+    if (uri.indexOf('embeded://') === 0) {
+      var path = uri.slice('embeded://'.length);
+      if (!ctx.zip) return Promise.resolve();
+      var entry = ctx.zip.find ? ctx.zip.find(path) : null;
+      if (!entry) return Promise.resolve();
+      return ctx.zip
+        .read(entry)
+        .then(function (bytes) {
+          bag.addBytes(pair.name, bytes, path);
+        })
+        .catch(function () {
+          bag.skipped++;
+        });
+    }
+    // PNG 의 __asset:<path>
+    if (uri.indexOf('__asset:') === 0) {
+      var key = uri.slice('__asset:'.length);
+      var b64 = ctx.pngChunks ? ctx.pngChunks['chara-ext-asset_:' + key] || ctx.pngChunks['chara-ext-asset_' + key] : null;
+      if (typeof b64 === 'string' && b64) {
+        try {
+          bag.addBytes(pair.name, b64ToBytes(b64.trim()), pair.name);
+        } catch (e) {
+          bag.skipped++;
+        }
+      }
+      return Promise.resolve();
+    }
+    // ccdefault: → 카드 이미지 자체는 별도 처리 (zip 아이콘 / PNG 원본)
+    return Promise.resolve();
+  }
+
+  /** 카드의 asset 목록을 순서대로 해석 */
+  function resolveCardAssets(cardData, ctx) {
+    var pairs = assetPairs(cardData);
+    var i = 0;
+    function next() {
+      if (i >= pairs.length) return Promise.resolve(ctx.bag.map);
+      var pair = pairs[i++];
+      return resolveAssetUri(pair, ctx).then(function () {
+        // type 이 icon 이면 아바타로 쓸 수 있게 표시
+        if (pair.type === 'icon') {
+          var rec = ctx.bag.map[String(pair.name).toLocaleLowerCase()];
+          if (rec) rec.icon = true;
+        }
+        return next();
+      });
+    }
+    return next();
+  }
+
+  /** CHARX zip 의 assets/** 를 이름 기준으로도 채워 넣는다 (asset 목록에 없을 때 대비) */
+  function fillFromZip(zip, bag) {
     var entries = zip.filter(function (e) {
       return !e.isDir && /^assets\//i.test(e.name) && IMAGE_EXT_RE.test(e.name);
     });
-
-    var picked = [];
-    for (var k = 0; k < entries.length; k++) {
-      var e = entries[k];
-      if (e.uncompSize && e.uncompSize > MAX_ASSET_BYTES) {
-        skipped++;
-        continue;
-      }
-      if (picked.length >= MAX_ASSET_COUNT) {
-        skipped++;
-        continue;
-      }
-      picked.push(e);
-    }
-
-    // 순차적으로 읽는다 (Promise.all 은 큰 파일에서 메모리를 몰아 쓴다)
-    var idx = 0;
+    var i = 0;
     function next() {
-      if (idx >= picked.length) {
-        if (skipped) warnings.push('에셋 ' + skipped + '개는 크기/개수 제한으로 건너뛰었습니다');
-        return Promise.resolve(out);
+      if (i >= entries.length) return Promise.resolve(bag.map);
+      var e = entries[i++];
+      var base = e.name.split('/').pop() || e.name;
+      var name = base.replace(/\.[A-Za-z0-9]+$/, '');
+      var isIconPath = /^assets\/icon\//i.test(e.name);
+      // 이미 채워진 이름이면 아이콘 표시만 하고 건너뛴다
+      var existing = bag.map[name.toLocaleLowerCase()];
+      if (existing) {
+        if (isIconPath) existing.icon = true;
+        return next();
       }
-      var e = picked[idx++];
       return zip
         .read(e)
         .then(function (bytes) {
-          var path = e.name;
-          var name = uriToName[path];
-          if (!name) {
-            var base = path.split('/').pop() || path;
-            name = base.replace(/\.[A-Za-z0-9]+$/, '');
-          }
-          if (total + bytes.length <= MAX_ASSET_TOTAL) {
-            total += bytes.length;
-            out[String(name).toLocaleLowerCase()] = {
-              mime: mimeOf(path),
-              b64: bytesToB64(bytes),
-              path: path,
-              icon: !!iconNames[String(name).toLocaleLowerCase()]
-            };
-            // zip 경로로도 찾을 수 있게 ({{asset::assets/x/y.png}} 형태 대비)
-            out[String(path).toLocaleLowerCase()] = out[String(name).toLocaleLowerCase()];
-          } else {
-            skipped++;
-          }
+          bag.addBytes(name, bytes, e.name);
+          var rec = bag.map[name.toLocaleLowerCase()];
+          if (rec && isIconPath) rec.icon = true;
           return next();
         })
         .catch(function () {
-          skipped++;
+          bag.skipped++;
           return next();
         });
     }
     return next();
+  }
+
+  /** 모듈 .risum 안의 내장 자산 (encodeRPack(compressSync(image))) */
+  function fillFromRisumAssets(module, rawAssets, bag) {
+    var names = [];
+    if (module && Array.isArray(module.assets)) {
+      for (var i = 0; i < module.assets.length; i++) {
+        var a = module.assets[i];
+        if (Array.isArray(a) && a[0]) names.push(String(a[0]));
+        else if (a && typeof a === 'object' && a.name) names.push(String(a.name));
+      }
+    }
+    for (var k = 0; k < rawAssets.length; k++) {
+      var name = names[k];
+      // 이름 메타데이터가 없으면 {{asset::이름}} 으로 참조할 수 없다 → 넣지 않는다
+      if (!name) continue;
+      var decoded = rawAssets[k];
+      if (!decoded || !decoded.length) continue;
+      // exportModuleLegacy 는 encodeRPack(compressSync(image)) 로 쓴다
+      bag.addBytes(name, decoded, name);
+    }
+    return bag.map;
   }
 
   // ==================================================================
@@ -874,7 +1000,7 @@
     return out;
   }
 
-  function readPngCard(bytes) {
+  function readPngCardWithChunks(bytes) {
     var chunks = readPngTextChunks(bytes);
     if (!chunks) return Promise.reject(new Error('PNG 가 아닙니다'));
     var order = ['ccv3', 'chara'];
@@ -897,7 +1023,15 @@
       break;
     }
     if (!jobs.length) return Promise.reject(new Error('PNG 안에 chara/ccv3 카드 데이터가 없습니다'));
-    return jobs[0];
+    return jobs[0].then(function (card) {
+      return { card: card, chunks: chunks };
+    });
+  }
+
+  function readPngCard(bytes) {
+    return readPngCardWithChunks(bytes).then(function (r) {
+      return r.card;
+    });
   }
 
   // ==================================================================
@@ -1226,20 +1360,21 @@
     if (!parsed || parsed.type !== 'risuModule') throw new Error("risum 본문 type 이 'risuModule' 이 아닙니다");
 
     var module = parsed.module || {};
-    var assetCount = 0;
+    var rawAssets = [];
     while (pos < b.length) {
       var mark = readByte();
       if (mark === 0) break;
       if (mark !== 1) throw new Error('risum 자산 마커가 1 이 아닙니다: ' + mark);
       var len = readLen();
-      readData(len); // 자산 본문은 시뮬레이터에서 쓰지 않는다
-      assetCount++;
+      // exportModuleLegacy: encodeRPack(compressSync(image)) → rpack 만 풀면 이미지 바이트
+      try {
+        rawAssets.push(decodeRPack(readData(len)));
+      } catch (e) {
+        rawAssets.push(null);
+      }
     }
 
-    var warnings = [];
-    if (assetCount) warnings.push('내장 자산 ' + assetCount + '개는 읽지 않았습니다 (이름만 사용)');
-
-    return { module: module, warnings: warnings, format: 'risum' };
+    return { module: module, warnings: [], rawAssets: rawAssets, format: 'risum' };
   }
 
   /** convertCharacterToModule (interchangeability.ts:55) 의 핵심 부분 */
@@ -1389,7 +1524,18 @@
       warnings = warnings.concat(innerWarnings);
 
       // --- 이미지 에셋 바이트 추출 (실제 <img> 로 렌더하기 위해) ---
-      return extractCharxAssets(zip, raw && raw.data ? raw.data : raw, warnings).then(function (assetsData) {
+      var cardData = raw && raw.data ? raw.data : raw;
+      var bag = newAssetBag(warnings);
+      return resolveCardAssets(cardData, { zip: zip, bag: bag })
+        .then(function () {
+          return fillFromZip(zip, bag);
+        })
+        .then(function () {
+          if (inner && inner.module) fillFromRisumAssets(inner.module, inner.rawAssets || [], bag);
+          if (bag.skipped) warnings.push('에셋 ' + bag.skipped + '개는 크기/개수 제한으로 건너뛰었습니다');
+          return bag.map;
+        })
+        .then(function (assetsData) {
         if (opts.asModule) {
           var asMod = characterToModule(normalized);
           var modEntry = normalizeModule(asMod, { format: 'charx', warnings: warnings });
@@ -1493,6 +1639,26 @@
   // ==================================================================
   // 11. 공개 API
   // ==================================================================
+
+  /** PNG 카드 한 장을 entry 로 (chara-ext-asset_ 청크까지 해석) */
+  function loadPngEntry(bytes, wanted) {
+    return readPngCardWithChunks(bytes).then(function (r) {
+      var n = normalizeCard(r.card);
+      var entry = wanted === 'module'
+        ? normalizeModule(characterToModule(n), { format: 'png' })
+        : normalizeCharacter(n, { format: 'png' });
+      var bag = newAssetBag(entry.warnings || []);
+      var cd = r.card && r.card.data ? r.card.data : r.card;
+      return resolveCardAssets(cd, { pngChunks: r.chunks, bag: bag }).then(function () {
+        // PNG 카드에서 ccdefault: 는 그 파일 자체 → 아이콘으로 쓸 수 있게 원본도 넣는다
+        if (bag.map['main'] == null) {
+          bag.addBytes('main', bytes, 'card.png');
+        }
+        entry.assetsData = bag.map;
+        return entry;
+      });
+    });
+  }
 
   function extOf(name) {
     var m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
@@ -1601,12 +1767,7 @@
           // 확장자만 .charx 이고 내용이 다른 경우를 구제한다
           // (PNG 로 저장, risum, 평문 JSON, 그리고 ZIP 이 아닌 것)
           if (startsWith(bytes, SIG_PNG)) {
-            return readPngCard(bytes).then(function (raw) {
-              var n = normalizeCard(raw);
-              return wanted === 'module'
-                ? finish(normalizeModule(characterToModule(n), { format: 'png' }))
-                : finish(normalizeCharacter(n, { format: 'png' }));
-            });
+            return loadPngEntry(bytes, wanted).then(finish);
           }
           if (bytes[0] === 111 && bytes[1] === 0) {
             var rr = parseRisum(bytes);
@@ -1622,25 +1783,27 @@
       }
 
       if (kind === 'png') {
-        return readPngCard(bytes).then(function (raw) {
-          var n = normalizeCard(raw);
-          if (wanted === 'module') {
-            return finish(normalizeModule(characterToModule(n), { format: 'png' }));
-          }
-          return finish(normalizeCharacter(n, { format: 'png' }));
-        });
+        return loadPngEntry(bytes, wanted).then(finish);
       }
 
       if (kind === 'risum') {
         var r = parseRisum(bytes);
-        return finish(normalizeModule(r.module, { format: 'risum', warnings: r.warnings }));
+        var risumEntry = normalizeModule(r.module, { format: 'risum', warnings: r.warnings });
+        var risumBag = newAssetBag([]);
+        fillFromRisumAssets(r.module, r.rawAssets || [], risumBag);
+        risumEntry.assetsData = risumBag.map;
+        return finish(risumEntry);
       }
 
       if (kind === 'module') {
         // .module 은 사실상 charx(zip). 혹시 risum 이면 그쪽으로.
         if (b0(bytes) === 111) {
           var rr = parseRisum(bytes);
-          return finish(normalizeModule(rr.module, { format: 'risum', warnings: rr.warnings }));
+          var rrEntry = normalizeModule(rr.module, { format: 'risum', warnings: rr.warnings });
+          var rrBag = newAssetBag([]);
+          fillFromRisumAssets(rr.module, rr.rawAssets || [], rrBag);
+          rrEntry.assetsData = rrBag.map;
+          return finish(rrEntry);
         }
         return parseCharx(bytes, { asModule: true });
       }

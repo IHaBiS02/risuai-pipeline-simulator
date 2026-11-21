@@ -22,7 +22,8 @@ risu-sim/
 ├── vendor/
 │   ├── wasmoon/        Lua 5.4 WASM 런타임 (index.js + glue.wasm)
 │   └── lua/json.lua    RisuAI 가 쓰는 json 라이브러리
-├── shot-cardui.png     HTML 카드 UI 봇 렌더 (실제 이미지 포함)
+├── shot-cardui.png     HTML 카드 UI 봇 렌더 (실제 이미지 모드)
+├── shot-htmlmode.png   같은 결과를 HTML 코드 모드로
 ├── shot-import.png     파일 불러오기 + 트레이스
 ├── shot-after.png      After 렌더 (중간 단계)
 ├── shot-preview.png    채팅 프리뷰
@@ -106,19 +107,58 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-77개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+84개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (77 checks)</pre>
+# → <pre id="out">ALL PASS (84 checks)</pre>
 ```
+
+## 보기 모드 — 실제 이미지 / HTML 코드
+
+결과 영역(과 트레이스의 after)은 **두 가지 보기 방식**을 제공합니다. 탭 바 오른쪽 `보기` 스위치로 바꿉니다.
+
+| 모드 | 보이는 것 |
+|---|---|
+| **실제 이미지** | 카드 CSS·에셋 이미지까지 적용한 실제 채팅 화면 |
+| **HTML 코드** | `trimMarkdown` 을 통과한 최종 HTML 소스 (스코프된 `<style>` 포함) |
+
+```
+트레이스 │ 결과 │ 스코프된 CSS │ 변수                 보기 [실제 이미지][HTML 코드]  ☑ CBS 전개
+```
+
+- 선택은 `localStorage` 에 저장됩니다.
+- **HTML 코드** 모드에서는 트레이스의 after 블록도 소스로 표시됩니다 (렌더 블록을 만들지 않음).
+- 실제 이미지 모드에서만 `.rendered` 블록이 생기므로, 큰 카드에서 렌더가 느릴 때 HTML 모드를 쓰면 됩니다.
+
+## 에셋 이미지
+
+불러온 카드의 이미지를 **실제로 꺼내서** 렌더합니다. CCv3 의 `asset.uri` 는 형태가 여러 가지라 전부 처리합니다.
+
+| `asset.uri` | 어디서 |
+|---|---|
+| `embeded://path` | CHARX zip 안의 파일 |
+| `__asset:path` | PNG 카드의 `chara-ext-asset_:<path>` tEXt 청크 (base64) |
+| `data:image/png;base64,...` | 그대로 사용 |
+| `https://...` | 그대로 사용 (브라우저가 로드) |
+| `ccdefault:` | 카드 이미지 자체 (PNG 카드면 그 파일) |
+
+추가로:
+
+- **모듈 `.risum` 내장 자산**도 읽습니다 (`encodeRPack(compressSync(image))` → rpack 만 풀면 이미지)
+- `{{image::x}}` → `<img src="blob:...">`, `{{raw::x}}` → **URL 문자열**
+  → `background:url({{raw::x}})` 같은 카드 CSS 도 그대로 동작
+- 아바타는 `type: 'icon'` 에셋 (보통 `main`) 을 사용
+- `assets/**` 중 카드가 이름으로 참조하지 않는 파일도 basename 으로 채워 둡니다
+- 제한: 파일 8MB / 전체 48MB / 200개 (넘으면 경고)
 
 ## After 렌더 (트레이스)
 
 트레이스의 **after** 블록을 실제 채팅처럼 렌더링합니다.
-탭 바 오른쪽의 **After 렌더** / **CBS 전개** 체크박스로 켜고 끕니다.
+트레이스의 after 는 위 **보기 모드**를 그대로 따릅니다 (실제 이미지 / HTML 코드).
+**CBS 전개** 체크박스는 별개입니다.
 
 ```
 after  [RENDER · CBS]
@@ -139,7 +179,8 @@ after  [RENDER · CBS]
   그래야 단계마다 다른 CSS 가 서로 섞이지 않습니다.
 - **CBS 전개**: 중간 단계의 after 에는 `{{char}}` 같은 CBS 가 아직 남아 있습니다
   (CBS 는 파이프라인 ④). 켜면 미리보기용으로 한 번 더 전개합니다.
-  **소스 보기**는 항상 원문 그대로입니다.
+  `소스 보기` 는 항상 원문 그대로입니다.
+- 보기 모드가 **HTML 코드** 면 `.rendered` 를 만들지 않고 after 를 `<pre>` 로만 보여줍니다.
 
 ## 테스트
 
