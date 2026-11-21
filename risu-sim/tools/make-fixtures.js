@@ -65,7 +65,8 @@ async function makeRisup(preset, { rpack = true } = {}) {
     type: 'preset',
     preset: await encryptBuffer(encodeMsgpack(preset), 'risupreset')
   });
-  const compressed = fflate.compressSync(outer); // zlib
+  // mtime 고정: 재생성해도 바이트가 같아야 diff 가 안 생긴다 (fflate gzip 은 MTIME 필드를 쓴다)
+  const compressed = fflate.compressSync(outer, { mtime: 0 });
   return rpack ? encodeRPack(Buffer.from(compressed)) : Buffer.from(compressed);
 }
 
@@ -87,7 +88,7 @@ function makeRisum(module, assets = []) {
 
   chunks.push(byte(111), byte(0), len(mainMsgpack.length), Buffer.from(mainMsgpack));
   for (const a of assets) {
-    const enc = encodeRPack(Buffer.from(fflate.compressSync(Buffer.from(a))));
+    const enc = encodeRPack(Buffer.from(fflate.compressSync(Buffer.from(a), { mtime: 0 })));
     chunks.push(byte(1), len(enc.length), enc);
   }
   chunks.push(byte(0));
@@ -98,7 +99,8 @@ function makeZip(files) {
   // files: { 'path': Buffer|string }
   const input = {};
   for (const [k, v] of Object.entries(files)) input[k] = Buffer.from(v);
-  return Buffer.from(fflate.zipSync(input, { level: 6 }));
+  // mtime 고정 (zip 은 엔트리마다 수정 시각을 저장한다)
+  return Buffer.from(fflate.zipSync(input, { level: 6, mtime: new Date('1980-01-01T00:00:00Z') }));
 }
 
 function makePngWithText(keyword, text) {
