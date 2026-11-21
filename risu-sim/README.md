@@ -12,7 +12,7 @@ risu-sim/
 ├── asset-runtime.js    동적 에셋 (OpenAI 호환 /embeddings)
 ├── trigger-runtime.js  트리거 VM (조건 / indent 인터프리터 / 35 effect)
 ├── ADDING-RUNTIMES.md  트리거·플러그인·동적 에셋 설계
-├── test.js             단위 테스트 96개 (node test.js)
+├── test.js             단위 테스트 114개 (node test.js)
 ├── tools/
 │   ├── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
 │   ├── make-fixtures.js    테스트용 실제 포맷 파일 생성기 (msgpackr + fflate)
@@ -22,6 +22,7 @@ risu-sim/
 ├── vendor/
 │   ├── wasmoon/        Lua 5.4 WASM 런타임 (index.js + glue.wasm)
 │   └── lua/json.lua    RisuAI 가 쓰는 json 라이브러리
+├── shot-cardui.png     HTML 카드 UI 봇 렌더 (실제 이미지 포함)
 ├── shot-import.png     파일 불러오기 + 트레이스
 ├── shot-after.png      After 렌더 (중간 단계)
 ├── shot-preview.png    채팅 프리뷰
@@ -105,13 +106,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-69개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+77개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (69 checks)</pre>
+# → <pre id="out">ALL PASS (77 checks)</pre>
 ```
 
 ## After 렌더 (트레이스)
@@ -131,7 +132,9 @@ after  [RENDER · CBS]
 ```
 
 - **자산**: `{{asset::x}}` / `{{image::x}}` 등을 `parseAdditionalAssets` 처럼 해석합니다
-  (정확 일치 → 레벤슈타인 유사도). 이미지 바이트는 없으므로 종류·이름이 보이는 자리표시자로 나옵니다.
+  (정확 일치 → 레벤슈타인 유사도). **charx 안의 이미지를 그대로 꺼내 `blob:` URL 로 넣습니다.**
+  `{{raw::x}}` 는 URL 문자열이 되므로 `background:url({{raw::x}})` 같은 카드 CSS 도 그대로 동작합니다.
+  (이미지 바이트가 없는 경우에만 자리표시자)
 - **카드 CSS**: 블록마다 스코프를 따로 줍니다 (`.simscope-N .x-risu-*`).
   그래야 단계마다 다른 CSS 가 서로 섞이지 않습니다.
 - **CBS 전개**: 중간 단계의 after 에는 `{{char}}` 같은 CBS 가 아직 남아 있습니다
@@ -142,7 +145,7 @@ after  [RENDER · CBS]
 
 ```bash
 cd risu-sim && node test.js
-# → 96 passed, 0 failed
+# → 114 passed, 0 failed
 ```
 
 ## 트리거
@@ -231,7 +234,7 @@ python3 tools/mock-embeddings.py 8899
 | **트리거 effect** — safeSubset 35개 + display/request 상태 5개 | **1:1** | `triggers.ts:975-1036` |
 | **트리거** — `runLLM`/`imgGen`/`command`/로어북 CRUD/alert | **스텁** (배지 표시) | — |
 | **동적 에셋** — 실행 조건 3개, 정확일치→레벤슈타인→임베딩, `bestMatchCache` | **1:1** | `scripts.ts:345-382` |
-| **자산 태그 해석** (`parseAdditionalAssets` 근사) | **근사** (이미지 대신 자리표시자) | `parser.svelte.ts:486-598` |
+| **자산 태그 해석** (`parseAdditionalAssets`) | **1:1** (charx 이미지는 실제 `<img>`/`url()`) | `parser.svelte.ts:486-598` |
 | **파일 불러오기** — `.risup` rpack/zlib/msgpack/AES-GCM, `.charx` ZIP, `.risum`, PNG `tEXt` | **1:1** | `database.svelte.ts:2385`, `modules.ts:125`, `characterCards.ts:61` |
 | **charx 의 `module.risum` 우선** (정규식·트리거 대체) | **1:1** | `characterCards.ts:158-167` |
 | **Lua 트리거 분리** (`effect[0]==='triggerlua'` → Lua 단계) | **1:1** | `scriptings.ts:1496-1512` |
@@ -249,6 +252,10 @@ python3 tools/mock-embeddings.py 8899
 
 `#when` 연산자: `and`, `or`, `is`, `isnot`, `>`, `<`, `>=`, `<=`, `not`, `var`, `vis`, `visnot`, `toggle`, `tis`, `tisnot`
 
+`#when` 의 피연산자는 **먼저 전개한 뒤** `::` 로 나눕니다. 원본은 문자 단위 스캐너라
+바깥 태그가 닫히기 전에 안쪽 `{{...}}` 이 이미 전개되어 있기 때문입니다.
+`{{#when::{{getvar::x}}::is::y}}` 처럼 변수를 조건에 쓰는 카드가 이 경로를 씁니다.
+
 미지원 태그는 **원문 그대로 남기고** 화면 하단에 목록으로 알려줍니다.
 
 ### 원본과 의도적으로 다른 부분
@@ -260,7 +267,7 @@ python3 tools/mock-embeddings.py 8899
 | `@@inject` | 채팅 메시지에 쓰지 않고 본문에서만 제거 | 채팅 DB 없음 |
 | `@@repeat_back` | "직전 메시지" 입력 1건만 참조 | 채팅 히스토리 없음 |
 | 로어북 발동 | 미구현 (불러와서 개수만 표시) | 스캔·토큰 계산 필요 |
-| 에셋 이미지 | 바이트 대신 자리표시자 | `saveAsset` 저장소 없음 |
+| 에셋 이미지 | charx 안의 이미지만 사용 (원격 URL·data URL 은 자리표시자) | 네트워크/저장소 없음 |
 | 캐시(`processScriptCache`) | 미구현 | 결과에 영향 없음 |
 | `#when` 내부 CBS | 원본과 동일하게 **false 여도 실행** | `parser.svelte.ts:1737-1760` |
 | `#if` 내부 CBS | 원본과 동일하게 **false 면 미실행** | `parser.svelte.ts:1214-1224` |

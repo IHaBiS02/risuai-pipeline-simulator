@@ -202,14 +202,19 @@
       }
       case 'when':
       case 'when_pure': {
-        var raw = rest.trim();
+        // 중요: 원본은 바깥 태그가 닫히기 전에 안쪽 {{...}} 이 이미 전개되어 있다.
+        // 그래서 '::' 로 나누기 **전에** 먼저 전개해야 한다.
+        //   {{#when::{{getvar::rel}}::is::yes}}
+        //   → 안쪽 전개 → :::yes::is::yes → split → ['yes','is','yes']
+        // (전개하지 않고 split 하면 '{{getvar' / 'rel}}' 로 쪼개져 항상 false 가 된다)
+        var raw = cbsParse(rest, ctx).trim();
         var stmt;
         if (raw.indexOf('::') === 0) {
           stmt = splitArgs(raw.slice(2));
         } else if (raw.charAt(0) === ':' && raw.charAt(1) === ':') {
           stmt = splitArgs(raw.slice(2));
         } else {
-          stmt = [cbsParse(raw.replace(/^[\s:]*(::)?/, ''), ctx)];
+          stmt = [raw.replace(/^[\s:]*(::)?/, '')];
         }
         var ok = evalWhen(stmt, ctx);
         var wparts = splitTopLevelElse(body);
@@ -273,7 +278,14 @@
   }
 
   function evalWhen(stmt, ctx) {
-    var st = stmt.slice();
+    // 원본 RisuAI 는 문자 단위 스캐너라, 바깥 태그를 만나기 전에 안쪽 {{...}} 이
+    // 이미 전개되어 있다 (parser.svelte.ts:1737 blockStartMatcher 로 넘어가는 dat).
+    // 그래서 #when 의 피연산자도 "전개된 값" 으로 비교해야 한다.
+    //   {{#when::{{getvar::x}}::is::foo}}  →  '값' is 'foo'
+    var st = stmt.map(function (v) {
+      var raw = String(v == null ? '' : v);
+      return raw.indexOf('{{') >= 0 ? cbsParse(raw, ctx) : raw;
+    });
     if (st.length === 0) return false;
     while (st.length > 1) {
       var condition = st.pop();
@@ -347,7 +359,9 @@
           break;
         }
         default:
-          st.push('0');
+          // parser.svelte.ts:1400-1412 — 모르는 연산자는 피연산자를 더 꺼내지 않고
+          // 그 자리에서 조건의 참/거짓만 남긴다 (greater_equal 같은 별칭이 이 경로).
+          st.push(isTruthy(condition) ? '1' : '0');
       }
     }
     return isTruthy(st[0]);
@@ -921,8 +935,46 @@
     return best;
   }
 
-  // 원본은 실제 이미지를 <img src="blob:..."> 로 넣는다. 시뮬레이터는 이미지 바이트를
-  // 갖고 있지 않으므로 "여기에 어떤 에셋이 들어갔는지" 보이는 자리표시자로 바꾼다.
+  // parser.svelte.ts:551-590 — 실제 에셋 경로(p)가 있을 때의 출력
+  function assetReal(type, name, src) {
+    var p = escapeHtml(src);
+    var a = escapeHtml(name);
+    var width = '';
+    switch (type) {
+      case 'raw':
+      case 'path':
+        // CSS url() 안에 그대로 들어간다
+        return p;
+      case 'img':
+        return '<img src="' + p + '" alt="' + a + '" style="' + width + ' "/>';
+      case 'image':
+        return '<div class="risu-inlay-image"><img src="' + p + '" alt="' + a + '" style="' + width + '"/></div>\n';
+      case 'asset':
+        return '<img src="' + p + '" alt="' + a + '" style="' + width + ' "/>\n';
+      case 'emotion':
+        return '<img src="' + p + '" alt="' + a + '" style="' + width + ' "/>';
+      case 'video':
+        return '<video controls autoplay loop><source src="' + p + '" type="video/mp4"></video>\n';
+      case 'video-img':
+        return '<video autoplay muted loop><source src="' + p + '" type="video/mp4"></video>\n';
+      case 'audio':
+        return '<audio controls autoplay loop><source src="' + p + '" type="audio/mpeg"></audio>\n';
+      case 'bg':
+        return (
+          '<div style="width:100%;height:100%;background: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.8)),url(' +
+          p +
+          '); background-size: cover;"></div>'
+        );
+      case 'bgm':
+        return '<div risu-ctrl="bgm___auto___' + p + '" style="display:none;"></div>\n';
+      case 'source':
+        return 'profile://' + a;
+      default:
+        return '<img src="' + p + '" alt="' + a + '" style="' + width + ' "/>';
+    }
+  }
+
+  // 실제 이미지 바이트가 없을 때의 자리표시자.
   // raw/path/source 는 CSS url() 등에 그대로 쓰여야 해서 문자열을 유지한다.
   function assetPlaceholder(type, name) {
     var n = escapeHtml(name);
@@ -956,7 +1008,7 @@
    * {{type::name}} → HTML 자리표시자.
    * 정확 일치(대소문자 무시) → 레벤슈타인 폴백 → 실패 시 '' (원본과 동일)
    */
-  function resolveAssetTags(data, names, maxDiff) {
+  function resolveAssetTags(data, names, maxDiff, srcOf) {
     if (!names || !names.length) return data;
     return data.replace(ASSET_TAG_RE, function (full, type, rawName) {
       var needle = String(rawName).toLocaleLowerCase();
@@ -969,6 +1021,16 @@
       }
       if (!hit) hit = getClosestMatch(needle, names, maxDiff == null ? 4 : maxDiff);
       if (!hit) return '';
+      // 실제 이미지 바이트가 있으면 원본처럼 <img src="blob:..."> 로 넣는다.
+      var src = null;
+      if (srcOf) {
+        try {
+          src = srcOf(hit);
+        } catch (e) {
+          src = null;
+        }
+      }
+      if (src) return assetReal(type, hit, src);
       return assetPlaceholder(type, hit);
     });
   }
@@ -1584,6 +1646,8 @@
     var mode = config.mode || 'editdisplay';
     var assetNames = (config.assets && config.assets.assetNames) || [];
     var maxDiff = config.assets && config.assets.maxDifference != null ? config.assets.maxDifference : 4;
+    // 에셋 이름 → 실제 이미지 URL (불러온 카드의 blob:). 없으면 자리표시자.
+    var assetSrcOf = (config.assets && config.assets.srcOf) || null;
 
     async function runTriggerPass(passMode) {
       if (!window.RisuTrigger) return null;
@@ -1619,7 +1683,7 @@
     var pipelineInput = config.input || '';
     var preAsset = null;
     if (mode === 'editdisplay' && assetNames.length > 0) {
-      var resolvedPre = resolveAssetTags(pipelineInput, assetNames, maxDiff);
+      var resolvedPre = resolveAssetTags(pipelineInput, assetNames, maxDiff, assetSrcOf);
       if (resolvedPre !== pipelineInput) {
         preAsset = { before: pipelineInput, after: resolvedPre };
       }
@@ -1635,6 +1699,7 @@
         charLua: config.charLua || [],
         moduleLua: config.moduleLua || [],
         assets: config.assets || null,
+        assetSrcOf: (config.assets && config.assets.srcOf) || null,
         charTriggers: config.charTriggers || [],
         moduleTriggers: config.moduleTriggers || []
       },
@@ -1670,7 +1735,7 @@
           after: preAsset.after
         });
       }
-      var resolvedPost = resolveAssetTags(finalText, assetNames, maxDiff);
+      var resolvedPost = resolveAssetTags(finalText, assetNames, maxDiff, assetSrcOf);
       if (resolvedPost !== finalText) {
         textResult.trace.push({
           stage: '⑥-b 자산 해석 (2차)',
@@ -1710,7 +1775,7 @@
     } else if (mode === 'editoutput') {
       // 실제 앱에서는 이 텍스트가 저장된 뒤 표시 단계를 한 번 더 거친다.
       // 그 왕복을 미리보기로 보여준다 (자산 해석 + CSS 스코프 포함).
-      var shown = resolveAssetTags(finalText, assetNames, maxDiff);
+      var shown = resolveAssetTags(finalText, assetNames, maxDiff, assetSrcOf);
       display = renderForDisplay(shown);
       display.note = '출력 결과를 표시 단계(자산 해석 → markdown → DOMPurify → CSS 스코프)에 통과시킨 미리보기';
     } else {
@@ -1784,7 +1849,7 @@
 
     // 자산 태그: 이름 목록을 주면 {{asset::x}} 류를 자리표시자로 바꾼다
     if (opts.resolveAssets !== false && opts.assets && opts.assets.length) {
-      src = resolveAssetTags(src, opts.assets, opts.maxDifference == null ? 4 : opts.maxDifference);
+      src = resolveAssetTags(src, opts.assets, opts.maxDifference == null ? 4 : opts.maxDifference, opts.srcOf || null);
     }
 
     var encoded = encodeStyle(src);

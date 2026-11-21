@@ -41,15 +41,23 @@
 
     (async function () {
       await sleep(400);
-      await feed('preset', await get('fixture-preset.risup'), 'fixture-preset.risup');
-      await feed('character', await get('fixture-bot.charx'), 'fixture-bot.charx');
-      await feed('module', await get('fixture-module.module'), 'fixture-module.module');
+      var solo = q.get('solo') === '1';
+      if (solo) {
+        d.getElementById('clearAll').click();
+        await sleep(400);
+      }
+      if (!solo) await feed('preset', await get('fixture-preset.risup'), 'fixture-preset.risup');
+      var botFile = q.get('bot') === 'cardui' ? 'fixture-cardui.charx' : 'fixture-bot.charx';
+      await feed('character', await get(botFile), botFile);
+      if (!solo) await feed('module', await get('fixture-module.module'), 'fixture-module.module');
 
-      d.getElementById('input').value =
-        '*{{char}} 가 고개를 든다.*\n\n' +
-        '<span class="hello">안녕, {{user}}.</span>\n\n' +
-        'HP: {{getvar::hp}}\n\n' +
-        '{{asset::smile_happy.png}} {{asset::angryy.png}}';
+      if (q.get('bot') !== 'cardui') {
+        d.getElementById('input').value =
+          '*{{char}} 가 고개를 든다.*\n\n' +
+          '<span class="hello">안녕, {{user}}.</span>\n\n' +
+          'HP: {{getvar::hp}}\n\n' +
+          '{{asset::smile_happy.png}} {{asset::angryy.png}}';
+      }
       d.getElementById('runBtn').click();
       await sleep(2500);
 

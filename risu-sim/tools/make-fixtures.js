@@ -95,6 +95,52 @@ function makeRisum(module, assets = []) {
   return Buffer.concat(chunks);
 }
 
+function makePng(w, h, rgb) {
+  const crcTable = (() => {
+    const t = new Int32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c;
+    }
+    return t;
+  })();
+  const crc32 = (buf) => {
+    let c = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) c = crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length, 0);
+    const t = Buffer.from(type, 'ascii');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([t, data])), 0);
+    return Buffer.concat([len, t, data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2; // truecolor
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    const off = y * (w * 3 + 1);
+    raw[off] = 0;
+    for (let x = 0; x < w; x++) {
+      raw[off + 1 + x * 3] = rgb[0];
+      raw[off + 2 + x * 3] = rgb[1];
+      raw[off + 3 + x * 3] = rgb[2];
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
 function makeZip(files) {
   // files: { 'path': Buffer|string }
   const input = {};
@@ -389,6 +435,65 @@ async function main() {
     }
   };
   write('fixture-bot.png', makePngWithText('chara', Buffer.from(JSON.stringify(v2), 'utf8').toString('base64')));
+
+  // UI 카드처럼 {{#when}} + 이미지/CSS 에셋을 쓰는 봇 (실제 화면 재현 검증용)
+  const CARDUI_FIRST = [
+    '<div class="ui-container">',
+    '<div class="parchment-bg"></div>',
+    '<button class="fm-title-btn" risu-trigger="toggle">!!! TEST PARTY !!!</button>',
+    '{{#when::{{getvar::view}}::isnot::demon}}',
+    '{{#when::{{getvar::closed}}::isnot::0}}<div class="fm-sub-ti">Click here to get started</div>',
+    '{{/when}}',
+    '{{/when}}',
+    '{{#when::{{getvar::reveal}}::is::yes}}<div class="fm-cat-grid">{{image::banner}}</div>{{/when}}',
+    '</div>'
+  ].join('\n');
+
+  const CARDUI_CSS =
+    '.ui-container{background:url({{raw::banner}}) no-repeat center;background-size:cover;' +
+    'border-radius:12px;padding:20px;color:#fff}' +
+    '.fm-title-btn{background:rgba(0,0,0,.45);border:0;color:#fff;font-size:18px;padding:8px 14px}' +
+    '.fm-sub-ti{color:#ffe9b0;letter-spacing:.2em;font-size:11px}';
+
+  const cardUi = {
+    spec: 'chara_card_v3',
+    spec_version: '3.0',
+    data: {
+      name: 'CardUiBot',
+      description: 'HTML 카드 UI 봇',
+      first_mes: '<style>' + CARDUI_CSS + '</style>\n' + CARDUI_FIRST,
+      alternate_greetings: [],
+      mes_example: '',
+      creator_notes: '',
+      character_version: '1.0',
+      tags: [],
+      creator: '',
+      character_book: { name: 'b', entries: [] },
+      extensions: {
+        risuai: {
+          customScripts: [],
+          triggerscript: [],
+          defaultVariables: '{"view":"normal","closed":"1","reveal":"yes"}',
+          additionalAssets: [['banner', '', 'png']]
+        }
+      },
+      assets: [
+        { type: 'icon', name: 'main', uri: 'embeded://assets/icon/images/main.png', ext: 'png' },
+        { type: 'x-risu-asset', name: 'banner', uri: 'embeded://assets/x-risu-asset/images/banner.png', ext: 'png' }
+      ],
+      group_only_greetings: [],
+      nickname: '',
+      source: []
+    }
+  };
+  write(
+    'fixture-cardui.charx',
+    makeZip({
+      'card.json': JSON.stringify(cardUi, null, 4),
+      'assets/icon/images/main.png': makePng(8, 8, [255, 120, 200]),
+      'assets/x-risu-asset/images/banner.png': makePng(16, 8, [200, 160, 90])
+    })
+  );
 
   // 모듈 JSON (type: risuModule)
   write('fixture-module.json', Buffer.from(JSON.stringify({ type: 'risuModule', ...MODULE }, null, 2), 'utf8'));

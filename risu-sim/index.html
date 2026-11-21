@@ -455,6 +455,7 @@
 
     <div class="toolbar">
       <button id="loadDemo">예시 불러오기</button>
+      <button id="clearAll" title="데모 내용을 지웁니다 (불러온 파일 목록은 그대로)">비우기</button>
       <button id="runBtn">실행</button>
     </div>
 
@@ -679,7 +680,7 @@
       moduleLua: Array.isArray(moduleLua) ? moduleLua : [],
       charTriggers: Array.isArray(charTriggers) ? charTriggers : [],
       moduleTriggers: Array.isArray(moduleTriggers) ? moduleTriggers : [],
-      assets: readAssetConfig()
+      assets: Object.assign(readAssetConfig(), { srcOf: assetSrcOf })
     };
 
     var result;
@@ -752,6 +753,7 @@
         // {{asset::}} 태그 해석은 카드에 에셋이 있으면 항상 일어난다 (parseAdditionalAssets).
         expandCbs: $('traceCbs').checked,
         assets: (cfg.assets && cfg.assets.assetNames) || [],
+        srcOf: cfg.assets && cfg.assets.srcOf,
         maxDifference: cfg.assets && cfg.assets.maxDifference,
         charName: cfg.charName,
         userName: cfg.userName,
@@ -985,7 +987,17 @@
     var isUser = $('mode').value === 'editinput';
     var who = isUser ? ($('userName').value || 'User') : ($('charName').value || 'Char');
     $('chatRow').className = 'chatrow' + (isUser ? ' user' : '');
-    $('chatAvatar').textContent = (who.trim().charAt(0) || '?').toUpperCase();
+    var av = $('chatAvatar');
+    var iconUrl = isUser ? null : assetSrcOf('main');
+    if (iconUrl) {
+      av.style.backgroundImage = 'url("' + iconUrl + '")';
+      av.style.backgroundSize = 'cover';
+      av.style.backgroundPosition = 'center';
+      av.textContent = '';
+    } else {
+      av.style.backgroundImage = '';
+      av.textContent = (who.trim().charAt(0) || '?').toUpperCase();
+    }
     $('chatName').textContent = who + (isUser ? ' (입력 단계)' : '');
 
     if (result.display.html) {
@@ -1102,6 +1114,54 @@
   // (getModuleByIds 가 db.modules 를 filter 하므로 선택 순서가 아니라 DB 순서다)
   var KIND_LABEL = { preset: '프리셋', character: '봇 카드', module: '모듈' };
   var KIND_MULTI = { preset: false, character: false, module: true };
+
+  // 불러온 카드의 이미지 에셋 → blob: URL (실제 <img> 로 렌더)
+  var assetUrls = {};
+  var assetUrlList = [];
+
+  function revokeAssetUrls() {
+    for (var i = 0; i < assetUrlList.length; i++) {
+      try {
+        URL.revokeObjectURL(assetUrlList[i]);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    assetUrlList = [];
+    assetUrls = {};
+  }
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+
+  function buildAssetUrls(entries) {
+    revokeAssetUrls();
+    var seen = [];
+    entries.forEach(function (entry) {
+      var data = entry && entry.assetsData;
+      if (!data) return;
+      Object.keys(data).forEach(function (k) {
+        var a = data[k];
+        if (!a || !a.b64 || seen.indexOf(a) >= 0) return;
+        seen.push(a);
+        try {
+          var url = URL.createObjectURL(new Blob([b64ToBytes(a.b64)], { type: a.mime || 'application/octet-stream' }));
+          assetUrls[k] = url;
+          assetUrlList.push(url);
+        } catch (e) {
+          /* ignore */
+        }
+      });
+    });
+  }
+
+  function assetSrcOf(name) {
+    return assetUrls[String(name).toLocaleLowerCase()] || null;
+  }
 
   var store = { preset: [], character: [], module: [] };
   var selected = { preset: null, character: null };
@@ -1242,7 +1302,17 @@
         } else {
           $('input').value = '';
         }
-        if (c.assets && c.assets.length) $('assetNames').value = c.assets.join('\n');
+        // 카드에 실제로 들어있는 이미지 이름도 목록에 합친다 (CSS url({{raw::..}}) 대응)
+        var names = (c.assets || []).slice();
+        Object.keys(c.assetsData || {}).forEach(function (k) {
+          if (k.indexOf('/') >= 0) return;
+          if (c.assetsData[k] && c.assetsData[k].icon) return; // 아이콘은 동적 에셋 목록에서 제외
+          for (var i = 0; i < names.length; i++) {
+            if (String(names[i]).toLocaleLowerCase() === k) return;
+          }
+          names.push(k);
+        });
+        if (names.length) $('assetNames').value = names.join('\n');
         if (c.vars && Object.keys(c.vars).length) setJson($('vars'), $('varsErr'), c.vars);
       }
       applied.character = c ? c.id : null;
@@ -1256,6 +1326,15 @@
       setJson($('moduleLua'), $('moduleLuaErr'), flat(mods, 'luaTriggers'));
       applied.modules = mods.map(function (m) { return m.id; });
     }
+
+    // 실제 이미지 URL 재생성 (봇 카드 우선, 없으면 체크된 모듈)
+    var urlSources = [];
+    var curChar = findEntry('character', selected.character);
+    if (curChar) urlSources.push(curChar);
+    store.module.forEach(function (m) {
+      if (moduleChecked[m.id]) urlSources.push(m);
+    });
+    buildAssetUrls(urlSources);
 
     renderImportLists();
     if (shouldRun !== false) run().catch(function (e) { console.error(e); });
@@ -1419,6 +1498,24 @@
     applied = { preset: null, character: null, modules: [] };
     renderImportLists();
     run();
+  });
+
+  // 데모로 채워진 칸을 비운다 (불러온 파일 목록은 유지)
+  $('clearAll').addEventListener('click', function () {
+    setJson($('presetRegex'), $('presetRegexErr'), []);
+    setJson($('charRegex'), $('charRegexErr'), []);
+    setJson($('moduleRegex'), $('moduleRegexErr'), []);
+    setJson($('charLua'), $('charLuaErr'), []);
+    setJson($('moduleLua'), $('moduleLuaErr'), []);
+    setJson($('charTriggers'), $('charTriggersErr'), []);
+    setJson($('moduleTriggers'), $('moduleTriggersErr'), []);
+    setJson($('vars'), $('varsErr'), {});
+    setJson($('globalVars'), $('globalVarsErr'), {});
+    $('input').value = '';
+    $('prevMessage').value = '';
+    applied = { preset: null, character: null, modules: [] };
+    renderImportLists();
+    run().catch(function (e) { console.error(e); });
   });
 
   $('runBtn').addEventListener('click', function () { run().catch(function (e) { console.error(e); }); });

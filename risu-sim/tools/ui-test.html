@@ -196,7 +196,12 @@
     ok('프리뷰가 비어 있지 않음', preview.textContent.trim().length > 0, preview.textContent.slice(0, 80));
     ok('채팅 버블이 봇 발화', d.getElementById('chatRow').className.indexOf('user') < 0);
     eq('버블 이름 = 봇 이름', d.getElementById('chatName').textContent, 'FixtureBot');
-    eq('아바타 첫 글자', d.getElementById('chatAvatar').textContent, 'F');
+    // 카드에 아이콘 에셋이 있으면 아바타가 이미지로 바뀐다 (없으면 첫 글자)
+    ok('아바타: 글자 또는 아이콘',
+      d.getElementById('chatAvatar').textContent === 'F' ||
+        /url\("blob:/.test(d.getElementById('chatAvatar').style.backgroundImage),
+      'text=' + JSON.stringify(d.getElementById('chatAvatar').textContent) +
+        ' bg=' + d.getElementById('chatAvatar').style.backgroundImage);
 
     // ---------- After 렌더 ----------
     eq('After 렌더 토글 기본 켜짐', d.getElementById('traceRender').checked, true);
@@ -258,6 +263,35 @@
     await sleep(300);
     eq('대체 인사 1번이 입력으로', d.getElementById('input').value, '*첫 번째 대체 인사*');
     ok('경고 배지 표시', d.querySelectorAll('#list-character .ib-item .warn').length > 0);
+
+    // ---------- HTML 카드 UI: 중첩 #when + 실제 이미지 ----------
+    var cardui = await (await fetch('fixtures/fixture-cardui.charx')).arrayBuffer();
+    var ci = d.getElementById('file-character');
+    var ciDt = new w.DataTransfer();
+    ciDt.items.add(new w.File([new Uint8Array(cardui)], 'fixture-cardui.charx'));
+    ci.files = ciDt.files;
+    ci.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await until(function () { return !/읽는 중/.test(d.getElementById('importMsg').textContent); }, 12000);
+    await sleep(600);
+    d.getElementById('runBtn').click();
+    await sleep(1500);
+
+    var ciHtml = d.getElementById('htmlOut').textContent;
+    var ciCss = d.getElementById('cssOut').textContent;
+    var ciFinal = d.getElementById('input').value;
+
+    eq('카드 UI 봇 이름', d.getElementById('charName').value, 'CardUiBot');
+    ok('남은 CBS 태그 없음', ciHtml.indexOf('{{') < 0, ciHtml.slice(0, 300));
+    ok('중첩 #when 통과 → 제목 버튼', /x-risu-fm-title-btn/.test(ciHtml), ciHtml.slice(0, 300));
+    ok('중첩 #when 참 분기 렌더', /x-risu-fm-sub-ti/.test(ciHtml), ciHtml.slice(0, 400));
+    ok('실제 이미지 <img src=blob:', /<img src="blob:/.test(ciHtml), ciHtml.slice(0, 500));
+    ok('CSS url(blob:) 로 배경 적용', /url\(blob:/.test(ciCss), ciCss.slice(0, 300));
+    ok('아바타에 카드 아이콘', /url\("blob:/.test(d.getElementById('chatAvatar').style.backgroundImage),
+      d.getElementById('chatAvatar').style.backgroundImage);
+    ok('blob: URL 이 실제로 살아 있음', (function () {
+      var m = /<img src="(blob:[^"]+)"/.exec(ciHtml);
+      return !!m && m[1].length > 10;
+    })(), ciHtml.slice(0, 300));
 
     // ---------- textarea 직접 수정 → 적용 표시 해제 ----------
     var ta = d.getElementById('charRegex');

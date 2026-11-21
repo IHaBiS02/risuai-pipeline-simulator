@@ -707,6 +707,128 @@
   }
 
   // ==================================================================
+  // 5-b. charx 안의 이미지 에셋 추출
+  //   스펙: assets/{type}/images/*, 참조는 data.assets[].uri = 'embeded://<path>'
+  //   RisuAI 는 getFileSrc 로 실제 파일을 읽어 <img src> 로 넣는다.
+  //   여기서는 zip 에서 바이트를 꺼내 base64 로 들고 있다가 UI 에서 blob: URL 로 만든다.
+  // ==================================================================
+
+  var IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|avif|bmp|apng)$/i;
+  var MAX_ASSET_BYTES = 4 * 1024 * 1024; // 파일 하나
+  var MAX_ASSET_TOTAL = 16 * 1024 * 1024; // 전체
+  var MAX_ASSET_COUNT = 64;
+
+  function mimeOf(name) {
+    var m = /\.([A-Za-z0-9]+)$/.exec(String(name || ''));
+    var ext = m ? m[1].toLowerCase() : '';
+    if (ext === 'png' || ext === 'apng') return 'image/png';
+    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+    if (ext === 'webp') return 'image/webp';
+    if (ext === 'gif') return 'image/gif';
+    if (ext === 'avif') return 'image/avif';
+    if (ext === 'bmp') return 'image/bmp';
+    if (ext === 'svg') return 'image/svg+xml';
+    if (ext === 'mp4' || ext === 'webm') return 'video/' + ext;
+    if (ext === 'mp3') return 'audio/mpeg';
+    if (ext === 'ogg') return 'audio/ogg';
+    if (ext === 'wav') return 'audio/wav';
+    return 'application/octet-stream';
+  }
+
+  function bytesToB64(bytes) {
+    if (typeof btoa === 'function') {
+      var bin = '';
+      var CH = 0x8000;
+      for (var i = 0; i < bytes.length; i += CH) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+      }
+      return btoa(bin);
+    }
+    /* eslint-disable no-undef */
+    if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+    /* eslint-enable no-undef */
+    return '';
+  }
+
+  /** zip 엔트리들에서 이미지/미디어를 뽑아 { nameLc: {mime, b64} } 로 만든다 */
+  function extractCharxAssets(zip, cardData, warnings) {
+    var out = {};
+    var total = 0;
+    var skipped = 0;
+
+    // data.assets 의 embeded:// 경로 → 에셋 이름
+    var uriToName = {};
+    var iconNames = {};
+    var list = (cardData && Array.isArray(cardData.assets) && cardData.assets) || [];
+    for (var i = 0; i < list.length; i++) {
+      var a = list[i];
+      if (!a || typeof a !== 'object') continue;
+      var uri = String(a.uri || '');
+      if (uri.indexOf('embeded://') === 0) {
+        uriToName[uri.slice('embeded://'.length)] = String(a.name || '');
+      }
+      if (a.type === 'icon') iconNames[String(a.name || '').toLocaleLowerCase()] = true;
+    }
+
+    var entries = zip.filter(function (e) {
+      return !e.isDir && /^assets\//i.test(e.name) && IMAGE_EXT_RE.test(e.name);
+    });
+
+    var picked = [];
+    for (var k = 0; k < entries.length; k++) {
+      var e = entries[k];
+      if (e.uncompSize && e.uncompSize > MAX_ASSET_BYTES) {
+        skipped++;
+        continue;
+      }
+      if (picked.length >= MAX_ASSET_COUNT) {
+        skipped++;
+        continue;
+      }
+      picked.push(e);
+    }
+
+    // 순차적으로 읽는다 (Promise.all 은 큰 파일에서 메모리를 몰아 쓴다)
+    var idx = 0;
+    function next() {
+      if (idx >= picked.length) {
+        if (skipped) warnings.push('에셋 ' + skipped + '개는 크기/개수 제한으로 건너뛰었습니다');
+        return Promise.resolve(out);
+      }
+      var e = picked[idx++];
+      return zip
+        .read(e)
+        .then(function (bytes) {
+          var path = e.name;
+          var name = uriToName[path];
+          if (!name) {
+            var base = path.split('/').pop() || path;
+            name = base.replace(/\.[A-Za-z0-9]+$/, '');
+          }
+          if (total + bytes.length <= MAX_ASSET_TOTAL) {
+            total += bytes.length;
+            out[String(name).toLocaleLowerCase()] = {
+              mime: mimeOf(path),
+              b64: bytesToB64(bytes),
+              path: path,
+              icon: !!iconNames[String(name).toLocaleLowerCase()]
+            };
+            // zip 경로로도 찾을 수 있게 ({{asset::assets/x/y.png}} 형태 대비)
+            out[String(path).toLocaleLowerCase()] = out[String(name).toLocaleLowerCase()];
+          } else {
+            skipped++;
+          }
+          return next();
+        })
+        .catch(function () {
+          skipped++;
+          return next();
+        });
+    }
+    return next();
+  }
+
+  // ==================================================================
   // 6. PNG 카드 (tEXt / iTXt 의 chara · ccv3)
   // ==================================================================
 
@@ -1266,21 +1388,22 @@
       }
       warnings = warnings.concat(innerWarnings);
 
-      // --- 봇 카드로 볼지, 모듈로 볼지 ---
-      if (opts.asModule) {
-        var asMod = characterToModule(normalized);
-        var modWarnings = warnings.slice();
-        if (assetEntries.length) {
-          modWarnings.push('charx 내 자산 ' + assetEntries.length + '개는 이름만 참조했습니다');
+      // --- 이미지 에셋 바이트 추출 (실제 <img> 로 렌더하기 위해) ---
+      return extractCharxAssets(zip, raw && raw.data ? raw.data : raw, warnings).then(function (assetsData) {
+        if (opts.asModule) {
+          var asMod = characterToModule(normalized);
+          var modEntry = normalizeModule(asMod, { format: 'charx', warnings: warnings });
+          modEntry.assetsData = assetsData;
+          return modEntry;
         }
-        return normalizeModule(asMod, { format: 'charx', warnings: modWarnings });
-      }
-
-      return normalizeCharacter(normalized, {
-        format: 'charx',
-        warnings: warnings,
-        assetEntries: assetEntries,
-        lorebookOverride: normalized.lorebookOverride || null
+        var charEntry0 = normalizeCharacter(normalized, {
+          format: 'charx',
+          warnings: warnings,
+          assetEntries: assetEntries,
+          lorebookOverride: normalized.lorebookOverride || null
+        });
+        charEntry0.assetsData = assetsData;
+        return charEntry0;
       });
     });
   }

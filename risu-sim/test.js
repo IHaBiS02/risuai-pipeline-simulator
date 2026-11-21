@@ -444,7 +444,51 @@ console.log('\n[22] importer — 실제 도구가 만드는 변형들');
   eq('ZIP 아닌 파일은 앞 8바이트를 보여줌', /앞 8바이트: ff d8 ff e0/.test(zipErr), true);
 }
 
-console.log('\n[23] importer 로 읽은 봇 → 파이프라인 실행');
+console.log('\n[23] CBS #when — 중첩 {{...}} 피연산자');
+{
+  const mk = (vars) => ({ vars, globalVars: {}, charName: 'B', userName: 'U', returnCSSError: true, unsupported: new Set(), chat: [] });
+  const p = (t, vars) => sim._internal.cbsParse(t, mk(vars || {}));
+
+  eq('{{getvar}}::is::값 → 참', p('{{#when::{{getvar::r}}::is::yes}}S{{/when}}', { r: 'yes' }), 'S');
+  eq('{{getvar}}::is::다른값 → 거짓', p('{{#when::{{getvar::r}}::is::no}}S{{/when}}', { r: 'yes' }), '');
+  eq('{{getvar}}::isnot → 참', p('{{#when::{{getvar::r}}::isnot::demon}}S{{/when}}', { r: 'yes' }), 'S');
+  eq('변수 미설정 isnot → 참', p('{{#when::{{getvar::none}}::isnot::demon}}S{{/when}}'), 'S');
+  eq(':else 분기', p('{{#when::{{getvar::r}}::is::no}}A{{:else}}B{{/when}}', { r: 'yes' }), 'B');
+  eq('숫자 비교', p('{{#when::{{getvar::n}}::>::1}}BIG{{/when}}', { n: '3' }), 'BIG');
+  eq('모르는 연산자는 죽지 않음', p('{{#when::{{getvar::n}}::greater_equal::5}}A{{/when}}B', { n: '9' }), 'B');
+  eq('중첩 블록 안쪽도 전개', p(
+    '{{#when::{{getvar::a}}::is::1}}{{#when::{{getvar::b}}::is::1}}BOTH{{/when}}{{/when}}',
+    { a: '1', b: '1' }
+  ), 'BOTH');
+}
+
+console.log('\n[24] 에셋 이미지 — charx 바이트 추출 + srcOf');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'tools', 'fixtures', f)));
+
+  const e = await imp.load({ name: 'fixture-cardui.charx', data: read('fixture-cardui.charx') });
+  const keys = Object.keys(e.assetsData || {});
+  eq('에셋 이름으로 추출됨', keys.indexOf('banner') >= 0, true);
+  eq('zip 경로로도 추출됨', keys.indexOf('assets/x-risu-asset/images/banner.png') >= 0, true);
+  eq('PNG MIME', e.assetsData.banner.mime, 'image/png');
+  eq('PNG 시그니처', Buffer.from(e.assetsData.banner.b64, 'base64').subarray(0, 4).toString('hex'), '89504e47');
+  eq('아이콘 표시', e.assetsData.main.icon, true);
+  eq('배너는 아이콘 아님', e.assetsData.banner.icon, false);
+
+  const withSrc = sim._internal.resolveAssetTags('{{image::banner}}', ['banner'], 4, () => 'blob:fake-url');
+  eq('image → inlay 래퍼 + 실제 img', withSrc,
+    '<div class="risu-inlay-image"><img src="blob:fake-url" alt="banner" style=""/></div>\n');
+  const imgTag = sim._internal.resolveAssetTags('{{img::banner}}', ['banner'], 4, () => 'blob:fake-url');
+  eq('img → 실제 img', imgTag, '<img src="blob:fake-url" alt="banner" style=" "/>');
+  const noSrc = sim._internal.resolveAssetTags('{{image::banner}}', ['banner'], 4, null);
+  eq('srcOf 없으면 자리표시자', noSrc.indexOf('x-risu-sim-asset') >= 0, true);
+  const rawTag = sim._internal.resolveAssetTags('url({{raw::banner}})', ['banner'], 4, () => 'blob:x');
+  eq('raw 는 URL 문자열', rawTag, 'url(blob:x)');
+}
+
+console.log('\n[25] importer 로 읽은 봇 → 파이프라인 실행');
 {
   const imp = require('./importer.js');
   const path = require('path');
