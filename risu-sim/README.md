@@ -12,7 +12,7 @@ risu-sim/
 ├── asset-runtime.js    동적 에셋 (OpenAI 호환 /embeddings)
 ├── trigger-runtime.js  트리거 VM (조건 / indent 인터프리터 / 35 effect)
 ├── ADDING-RUNTIMES.md  트리거·플러그인·동적 에셋 설계
-├── test.js             단위 테스트 89개 (node test.js)
+├── test.js             단위 테스트 96개 (node test.js)
 ├── tools/
 │   ├── mock-embeddings.py  API 키 없이 테스트하는 목 임베딩 서버
 │   ├── make-fixtures.js    테스트용 실제 포맷 파일 생성기 (msgpackr + fflate)
@@ -73,6 +73,25 @@ cd risu-sim && python3 -m http.server 8080
 > **보안 컨텍스트 필요**: `.risup` 은 WebCrypto(AES-GCM)로 복호화합니다.
 > `https://` 또는 `http://localhost` 에서만 동작하고, `file://` 에서는 안 됩니다.
 
+### CHARX(ZIP) 리더가 받아들이는 것
+
+`card.json` 은 스펙대로 **zip 루트**에 있어야 하지만, 실제 파일이 다양해서 아래는 모두 처리합니다
+(`tools/fixtures/`, Python `zipfile`, fflate 로 만든 변형으로 회귀 테스트함).
+
+| 변형 | 처리 |
+|---|---|
+| deflate(8) · stored(0) | ✓ |
+| ZIP64 (EOCD64 / 0xFFFFFFFF + extra 0x0001) | ✓ |
+| data descriptor (bit 3) — 스트리밍 writer | ✓ 중앙 디렉터리를 읽으므로 |
+| 아카이브 주석 (EOCD 가 끝에서 22바이트가 아님) | ✓ |
+| **JPEG 바이트가 앞에 붙은 ZIP** (RisuAI `charxJpeg`) | ✓ prefix 길이를 계산해 보정 |
+| `card.json` 이 첫 엔트리가 아님 | ✓ |
+| `card.json` 이 하위 경로(`x/card.json`) | ✓ 접미사 매칭 |
+| bzip2(12) · lzma(14) | ✗ 명확한 오류 (캐릭터 카드 도구는 쓰지 않음) |
+
+실패하면 **무엇이 문제인지** 알려줍니다 — ZIP 이 아니면 앞 8바이트를, `card.json` 이 없으면
+**zip 안에 든 파일 이름 목록**을 보여줍니다.
+
 ### 실제 포맷으로 테스트하기
 
 `tools/fixtures/` 아래 파일들은 **RisuAI 가 쓰는 라이브러리(msgpackr, fflate)로 직접 생성**한
@@ -86,13 +105,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-65개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입).
+69개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (65 checks)</pre>
+# → <pre id="out">ALL PASS (69 checks)</pre>
 ```
 
 ## After 렌더 (트레이스)
@@ -123,7 +142,7 @@ after  [RENDER · CBS]
 
 ```bash
 cd risu-sim && node test.js
-# → 89 passed, 0 failed
+# → 96 passed, 0 failed
 ```
 
 ## 트리거

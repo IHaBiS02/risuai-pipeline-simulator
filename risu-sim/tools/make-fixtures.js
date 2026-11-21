@@ -320,6 +320,20 @@ async function main() {
   // 봇 카드만 있고 module.risum 이 없는 charx (트리거/정규식이 card.json 에 있음)
   write('fixture-bot-nomod.charx', makeZip({ 'card.json': JSON.stringify(BOT_CARD, null, 4) }));
 
+  // charxJpeg 구조: JPEG 바이트 뒤에 ZIP 을 붙인다.
+  // characterCards.ts:1324 → CharXWriter.writeJpeg 가 앞에 JPEG 을 먼저 쓴다.
+  // RisuAI 의 fflate Unzip 은 이걸 허용하므로 리더도 허용해야 한다.
+  const jpegPrefix = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    Buffer.from('\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00', 'binary'),
+    Buffer.from('JPEGDATA'.repeat(50), 'binary'),
+    Buffer.from([0xff, 0xd9])
+  ]);
+  write(
+    'fixture-charxjpeg.charx',
+    Buffer.concat([jpegPrefix, makeZip({ 'card.json': JSON.stringify(BOT_CARD, null, 4) })])
+  );
+
   // module 이 .module 확장자로 나가는 경우 (exportModule 경로)
   const modCharCard = {
     spec: 'chara_card_v3',

@@ -1310,6 +1310,55 @@
     });
   });
 
+  // 페이지 어디에 떨어뜨려도 알아서 분류한다.
+  // (박스 밖에 떨어뜨리면 브라우저가 파일로 이동해버려서 "안 열린 것"처럼 보인다)
+  async function addAnyFiles(files) {
+    if (!files || !files.length) return;
+    if (!window.RisuImport) {
+      importMsg('importer.js 가 로드되지 않았습니다', true);
+      return;
+    }
+    importMsg('파일 ' + files.length + '개 읽는 중…', false);
+    var routed = { preset: [], character: [], module: [] };
+    var errs = [];
+    for (var i = 0; i < files.length; i++) {
+      try {
+        // kind 를 주지 않고 내용으로 판별한다
+        var entry = await window.RisuImport.load(files[i], {});
+        routed[entry.kind].push(entry);
+      } catch (e) {
+        errs.push(files[i].name + ': ' + ((e && e.message) || e));
+      }
+    }
+    var notes = [];
+    ['preset', 'character', 'module'].forEach(function (kind) {
+      if (!routed[kind].length) return;
+      // 봇/프리셋은 1개만 선택되므로 새로 들어온 것을 선택한다
+      addEntries(kind, routed[kind]);
+      notes.push(KIND_LABEL[kind] + ' ' + routed[kind].length + '개');
+    });
+    if (notes.length) applySelection(true);
+    if (errs.length) importMsg((notes.length ? notes.join(' · ') + ' 추가\n[실패]\n' : '[실패]\n') + errs.join('\n'), true);
+    else if (notes.length) importMsg(notes.join(' · ') + ' 불러옴', false);
+  }
+
+  ['dragenter', 'dragover'].forEach(function (evName) {
+    document.addEventListener(evName, function (ev) {
+      if (ev.dataTransfer && Array.prototype.indexOf.call(ev.dataTransfer.types || [], 'Files') >= 0) {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'copy';
+      }
+    });
+  });
+  document.addEventListener('drop', function (ev) {
+    if (!ev.dataTransfer) return;
+    ev.preventDefault();
+    var files = Array.prototype.slice.call(ev.dataTransfer.files || []);
+    // 박스 안에 떨어뜨린 경우는 박스 핸들러가 이미 처리했다
+    if (ev.defaultPrevented && ev.target && ev.target.closest && ev.target.closest('.ib')) return;
+    addAnyFiles(files);
+  });
+
   // textarea 를 직접 고치면 "적용 중" 표시를 지운다
   var INVALIDATES = {
     presetRegex: 'preset',

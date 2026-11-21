@@ -319,6 +319,7 @@ console.log('\n[18] importer — 파일 형식 (픽스처는 실제 라이브러
     'fixture-bot.charx': ['character', 'charx'],
     'fixture-bot-nomod.charx': ['character', 'charx'],
     'fixture-bot.png': ['character', 'png'],
+    'fixture-charxjpeg.charx': ['character', 'charx'],
     'fixture-module.module': ['module', 'charx'],
     'fixture-module.risum': ['module', 'risum'],
     'fixture-module.json': ['module', 'json']
@@ -403,7 +404,47 @@ console.log('\n[21] importer — 모듈 3형식 동일성 + 잘못된 입력');
   eq('알 수 없는 확장자는 오류', /지원하지 않는 파일/.test(err2), true);
 }
 
-console.log('\n[22] importer 로 읽은 봇 → 파이프라인 실행');
+console.log('\n[22] importer — 실제 도구가 만드는 변형들');
+{
+  const imp = require('./importer.js');
+  const path = require('path');
+  const read = (f) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'tools', 'fixtures', f)));
+
+  // charxJpeg: JPEG 바이트 + ZIP (RisuAI exportCharacterCard 'charxJpeg')
+  const j = await imp.load({ name: 'fixture-charxjpeg.charx', data: read('fixture-charxjpeg.charx') });
+  eq('JPEG prefix 붙은 charx 도 읽힘', j.kind, 'character');
+  eq('JPEG prefix charx 이름', j.character.name, 'FixtureBot');
+
+  // first_mes 가 비면 alternate_greetings[0] 을 쓴다
+  const ng = await imp.load({ name: 'fixture-nogreeting.json', data: read('fixture-nogreeting.json') });
+  eq('대체 인사로 대체', ng.character.firstMessage, '*첫 번째 대체 인사*');
+  eq('대체했다는 경고', /alternate_greetings/.test(ng.warnings.join(' ')), true);
+
+  // lorebook entries 에 null 이 섞여도 죽지 않는다
+  const dirty = {
+    spec: 'chara_card_v3', spec_version: '3.0',
+    data: {
+      name: 'Dirty', description: '', first_mes: 'hi', mes_example: '', creator_notes: '',
+      character_version: '1', tags: [], creator: '', alternate_greetings: [],
+      character_book: { entries: [null, { keys: ['a'], content: 'c' }] },
+      extensions: {}, assets: []
+    }
+  };
+  let dirtyErr = null;
+  try {
+    await imp.load({ name: 'd.json', data: new TextEncoder().encode(JSON.stringify(dirty)) });
+  } catch (e) { dirtyErr = e.message; }
+  eq('lorebook 에 null 이 있어도 통과', dirtyErr, null);
+
+  // ZIP 이 아닌 파일은 앞 8바이트를 보여준다
+  let zipErr = '';
+  try {
+    imp.readZip(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]));
+  } catch (e) { zipErr = e.message; }
+  eq('ZIP 아닌 파일은 앞 8바이트를 보여줌', /앞 8바이트: ff d8 ff e0/.test(zipErr), true);
+}
+
+console.log('\n[23] importer 로 읽은 봇 → 파이프라인 실행');
 {
   const imp = require('./importer.js');
   const path = require('path');

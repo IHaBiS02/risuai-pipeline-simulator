@@ -68,6 +68,12 @@
     throw new Error('바이트 배열이 아닙니다');
   }
 
+  function hexHead(b, n) {
+    var out = [];
+    for (var i = 0; i < Math.min(n, b.length); i++) out.push(('0' + b[i].toString(16)).slice(-2));
+    return out.join(' ') || '(빈 파일)';
+  }
+
   function startsWith(b, sig, offset) {
     offset = offset || 0;
     if (b.length < offset + sig.length) return false;
@@ -582,10 +588,17 @@
 
   function readZip(bytes) {
     var b = toBytes(bytes);
-    if (!startsWith(b, SIG_LOC)) throw new Error('ZIP 이 아닙니다 (로컬 헤더 시그니처 없음)');
 
+    // RisuAI 의 charxJpeg 는 JPEG 바이트를 먼저 쓰고 그 뒤에 ZIP 을 붙인다.
+    // (characterCards.ts:1324 → CharXWriter.writeJpeg, fflate Unzip 도 이걸 허용한다)
+    // 그래서 "파일이 PK 로 시작" 을 강제하지 않고, EOCD 를 찾은 뒤 앞쪽 prefix 길이를 보정한다.
     var eocd = findSignatureBack(b, SIG_EOCD, b.length - 22);
-    if (eocd < 0) throw new Error('ZIP 중앙 디렉터리를 찾을 수 없습니다');
+    if (eocd < 0) {
+      throw new Error(
+        'ZIP 중앙 디렉터리(EOCD)를 찾을 수 없습니다 — ZIP 파일이 아닙니다' +
+          ' (앞 8바이트: ' + hexHead(b, 8) + ', ' + b.length + ' bytes)'
+      );
+    }
 
     var count = u16(b, eocd + 10);
     var cdSize = u32(b, eocd + 12);
@@ -602,6 +615,25 @@
           cdOffset = u64(b, e64off + 48);
         }
       }
+    }
+
+    // 앞에 다른 데이터가 붙은 아카이브(JPEG + ZIP 등)면 중앙 디렉터리 오프셋이
+    // 파일 시작 기준이 아니라 ZIP 시작 기준이다. 실제 위치를 보고 차이를 구한다.
+    var base = 0;
+    if (!startsWith(b, SIG_CEN, cdOffset)) {
+      var guess = eocd - cdSize - cdOffset;
+      if (guess > 0 && guess + cdOffset + 4 <= b.length && startsWith(b, SIG_CEN, guess + cdOffset)) {
+        base = guess;
+      } else if (!startsWith(b, SIG_CEN, cdOffset)) {
+        throw new Error(
+          'ZIP 중앙 디렉터리가 손상되었습니다 (cdOffset ' + cdOffset + ', EOCD ' + eocd +
+            ', count ' + count + ')'
+        );
+      }
+    }
+    if (base) {
+      // prefix 가 있으면 로컬 헤더 오프셋도 같이 민다
+      cdOffset = base + cdOffset;
     }
 
     var entries = [];
@@ -631,7 +663,7 @@
         method: method,
         compSize: compSize,
         uncompSize: uncompSize,
-        localOffset: localOffset,
+        localOffset: localOffset + base,
         isDir: name.charAt(name.length - 1) === '/',
         utf8: (flags & 0x800) !== 0
       });
@@ -644,7 +676,9 @@
       var e = typeof entry === 'string' ? entries.filter(function (x) { return x.name === entry; })[0] : entry;
       if (!e) return Promise.reject(new Error('ZIP 안에 ' + entry + ' 가 없습니다'));
       var lp = e.localOffset;
-      if (!startsWith(b, SIG_LOC, lp)) return Promise.reject(new Error('ZIP 로컬 헤더가 깨졌습니다: ' + e.name));
+      if (!startsWith(b, SIG_LOC, lp)) {
+        return Promise.reject(new Error('ZIP 로컬 헤더가 깨졌습니다: ' + e.name + ' (offset ' + lp + ')'));
+      }
       var nLen = u16(b, lp + 26);
       var xLen = u16(b, lp + 28);
       var dataStart = lp + 30 + nLen + xLen;
@@ -834,7 +868,11 @@
   /** character_book → 간단한 로어 목록 (시뮬레이터에서는 표시용) */
   function summarizeLorebook(book) {
     if (!book || !Array.isArray(book.entries)) return [];
-    return book.entries.map(function (e) {
+    return book.entries
+      .filter(function (e) {
+        return e && typeof e === 'object';
+      })
+      .map(function (e) {
       return {
         keys: Array.isArray(e.keys) ? e.keys : [],
         comment: e.comment || e.name || '',
@@ -843,7 +881,7 @@
         enabled: e.enabled !== false,
         insertorder: e.insertion_order != null ? e.insertion_order : e.insert_order
       };
-    });
+      });
   }
 
   /** 스크립트 배열에서 Lua 훅만 분리 (effect[0].type === 'triggerlua') */
@@ -1155,7 +1193,22 @@
       });
 
     if (!cardEntry && !moduleEntry) {
-      return Promise.reject(new Error('charx 안에 card.json 도 module.risum 도 없습니다'));
+      var names = zip
+        .filter(function (e) {
+          return !e.isDir;
+        })
+        .map(function (e) {
+          return e.name;
+        });
+      return Promise.reject(
+        new Error(
+          'charx 안에 card.json 도 module.risum 도 없습니다' +
+            (names.length
+              ? ' — 안에 든 파일 ' + names.length + '개: ' + names.slice(0, 12).join(', ') +
+                (names.length > 12 ? ' …' : '')
+              : ' — 빈 압축 파일')
+        )
+      );
     }
 
     var jobs = [];
@@ -1253,7 +1306,16 @@
           return p.replace(/^assets\//i, '');
         });
     }
-    if (!n.firstMessage) warnings.push('퍼스트 메시지가 비어 있습니다');
+    if (!n.firstMessage) {
+      if (n.alternateGreetings.length) {
+        // first_mes 가 비어 있고 대체 인사만 있는 카드가 있다.
+        // 시뮬레이터는 메시지 1건이 필요하므로 대체 인사 1번을 쓴다 (명시).
+        n.firstMessage = n.alternateGreetings[0];
+        warnings.push('first_mes 가 비어 있어 alternate_greetings[0] 을 입력으로 사용합니다');
+      } else {
+        warnings.push('퍼스트 메시지가 비어 있습니다');
+      }
+    }
 
     var vars = {};
     if (typeof n.defaultVariables === 'string' && n.defaultVariables.trim()) {
@@ -1412,7 +1474,28 @@
       }
 
       if (kind === 'charx' || kind === 'zip') {
-        return parseCharx(bytes, { asModule: wanted === 'module' });
+        return parseCharx(bytes, { asModule: wanted === 'module' }).catch(function (err) {
+          // 확장자만 .charx 이고 내용이 다른 경우를 구제한다
+          // (PNG 로 저장, risum, 평문 JSON, 그리고 ZIP 이 아닌 것)
+          if (startsWith(bytes, SIG_PNG)) {
+            return readPngCard(bytes).then(function (raw) {
+              var n = normalizeCard(raw);
+              return wanted === 'module'
+                ? finish(normalizeModule(characterToModule(n), { format: 'png' }))
+                : finish(normalizeCharacter(n, { format: 'png' }));
+            });
+          }
+          if (bytes[0] === 111 && bytes[1] === 0) {
+            var rr = parseRisum(bytes);
+            return finish(normalizeModule(rr.module, { format: 'risum', warnings: rr.warnings }));
+          }
+          if (bytes[0] === 0x7b /* { */) {
+            return load(file, Object.assign({}, opts, { _jsonPass: true })).then(function (e) {
+              return e;
+            });
+          }
+          throw err; // 그래도 안 되면 원래 ZIP 오류를 그대로 보여준다
+        });
       }
 
       if (kind === 'png') {

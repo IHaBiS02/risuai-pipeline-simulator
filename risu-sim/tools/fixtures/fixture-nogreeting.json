@@ -1,0 +1,35 @@
+{
+  "spec": "chara_card_v3",
+  "spec_version": "3.0",
+  "data": {
+    "name": "NoGreetingBot",
+    "description": "first_mes 가 비어 있고 alternate_greetings 만 있는 카드",
+    "first_mes": "",
+    "mes_example": "",
+    "creator_notes": "",
+    "character_version": "1.0",
+    "tags": [],
+    "creator": "",
+    "alternate_greetings": ["*첫 번째 대체 인사*", "*두 번째 대체 인사*"],
+    "character_book": { "name": "b", "entries": [] },
+    "extensions": {
+      "risuai": {
+        "customScripts": [
+          {
+            "comment": "nogreeting css",
+            "type": "editdisplay",
+            "in": "^([\\s\\S]*)$",
+            "out": "<style>.ng{color:#ff0}</style>\n<div class=\"ng\">$1</div>",
+            "ableFlag": true,
+            "flag": "g"
+          }
+        ],
+        "triggerscript": []
+      }
+    },
+    "assets": [],
+    "group_only_greetings": [],
+    "nickname": "",
+    "source": []
+  }
+}

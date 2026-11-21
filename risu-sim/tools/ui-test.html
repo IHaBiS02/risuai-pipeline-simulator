@@ -233,6 +233,32 @@
     await sleep(1500);
     ok('다시 켜면 복구', d.querySelectorAll('#pane-trace .rendered').length > 0);
 
+    // ---------- 페이지 아무 데나 드롭 (전역 라우팅) ----------
+    var beforeChar = items('character');
+    var beforeMod = items('module');
+    var dropDt = new w.DataTransfer();
+    dropDt.items.add(new w.File([byName['fixture-bot-nomod.charx'].bytes], 'fixture-bot-nomod.charx'));
+    dropDt.items.add(new w.File([byName['fixture-module.risum'].bytes], 'fixture-module.risum'));
+    d.body.dispatchEvent(new w.DragEvent('drop', { dataTransfer: dropDt, bubbles: true, cancelable: true }));
+    await until(function () { return items('character') > beforeChar; }, 8000);
+    await sleep(400);
+    ok('페이지 어디에 떨어뜨려도 봇으로 분류', items('character') === beforeChar + 1,
+      'before=' + beforeChar + ' after=' + items('character'));
+    ok('같은 드롭에서 모듈도 분류', items('module') === beforeMod + 1,
+      'before=' + beforeMod + ' after=' + items('module'));
+
+    // ---------- first_mes 가 비어 있으면 대체 인사로 ----------
+    var nog = await (await fetch('fixtures/fixture-nogreeting.json')).arrayBuffer();
+    var nogInput = d.getElementById('file-character');
+    var nogDt = new w.DataTransfer();
+    nogDt.items.add(new w.File([new Uint8Array(nog)], 'fixture-nogreeting.json'));
+    nogInput.files = nogDt.files;
+    nogInput.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await until(function () { return !/읽는 중/.test(d.getElementById('importMsg').textContent); }, 8000);
+    await sleep(300);
+    eq('대체 인사 1번이 입력으로', d.getElementById('input').value, '*첫 번째 대체 인사*');
+    ok('경고 배지 표시', d.querySelectorAll('#list-character .ib-item .warn').length > 0);
+
     // ---------- textarea 직접 수정 → 적용 표시 해제 ----------
     var ta = d.getElementById('charRegex');
     ta.value = '[]';
@@ -256,10 +282,13 @@
     eq('거부되어도 목록은 그대로', items('preset'), 2);
 
     // ---------- 제거 ----------
+    var beforeRemove = items('module');
+    var beforeRegex = json('moduleRegex').length;
     d.querySelector('#list-module .ib-item .x').click();
     await sleep(300);
-    eq('모듈 제거', items('module'), 1);
-    eq('남은 모듈 정규식 1개', json('moduleRegex').length, 1);
+    eq('모듈 제거', items('module'), beforeRemove - 1);
+    ok('남은 모듈 정규식도 줄어듬', json('moduleRegex').length < beforeRegex,
+      beforeRegex + ' -> ' + json('moduleRegex').length);
   }
 })();
 </script>
