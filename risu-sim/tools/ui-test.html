@@ -194,8 +194,10 @@
 
     var preview = d.getElementById('preview');
     ok('프리뷰가 비어 있지 않음', preview.textContent.trim().length > 0, preview.textContent.slice(0, 80));
-    ok('채팅 버블이 봇 발화', d.getElementById('chatRow').className.indexOf('user') < 0);
-    eq('버블 이름 = 봇 이름', d.getElementById('chatName').textContent, 'FixtureBot');
+    ok('머리말은 봇 발화', d.getElementById('chatName').textContent.indexOf('입력 단계') < 0,
+      d.getElementById('chatName').textContent);
+    eq('머리말 이름 = 봇 이름', d.getElementById('chatName').textContent, 'FixtureBot');
+    ok('말풍선 제거(전체 폭)', !d.querySelector('.bubble'), 'bubble exists');
     // 카드에 아이콘 에셋이 있으면 아바타가 이미지로 바뀐다 (없으면 첫 글자)
     ok('아바타: 글자 또는 아이콘',
       d.getElementById('chatAvatar').textContent === 'F' ||

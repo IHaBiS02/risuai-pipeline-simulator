@@ -112,13 +112,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-103개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+104개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (103 checks)</pre>
+# → <pre id="out">ALL PASS (104 checks)</pre>
 ```
 
 ## 보기 모드 — 실제 이미지 / HTML 코드
@@ -144,6 +144,13 @@ chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
 
 미리보기의 `<button risu-trigger="이름">` 을 **클릭하면 그 트리거가 실행**됩니다
 (`Chat.svelte:305` → `runTrigger('manual', { manualName })`). 실행 후 결과로 다시 렌더링합니다.
+
+### 결과 레이아웃
+
+RisuAI 는 메시지를 **말풍선으로 감싸지 않고** 채팅 영역 전체 폭에 렌더링합니다.
+카드 UI 봇은 `width:100%` 전제로 만든 HTML 이라 말풍선에 가두면 레이아웃이 깨집니다.
+그래서 결과는 전체 폭 `.chattext` 로 그리고, 이름·아이콘 머리말은 **기능 → 이름·아바타**
+(기본 꺼짐)로 뺐습니다.
 
 ### 변수 — 하나의 공간
 
@@ -202,6 +209,15 @@ caption / divider             → 라벨 / 구분선
 
 > `markdown` 을 꺼도 `<style>` 은 `encodeStyle` 을 거친 상태로 넘겨야 스코프가 걸립니다.
 > (이전에는 마크다운 off 일 때 원문을 그대로 넘겨서 CSS 가 스코프되지 않았습니다)
+
+### 진단 — 왜 이미지가 안 붙었나
+
+| 위치 | 보이는 것 |
+|---|---|
+| 상단 배지 **미해석 에셋 N** | 결과에 남은 `{{asset::…}}` 태그 수 (hover 하면 이름 목록) |
+| **배경** 탭 | `backgroundHTML` + `module.backgroundEmbedding` 의 렌더 결과·스코프 CSS·이미지 태그 수 |
+
+`{{asset::x}}` 가 남는다는 건 ① 이름이 에셋 목록에 없거나 ② 크기/개수 제한으로 빠졌다는 뜻입니다.
 
 ## 에셋 이미지
 

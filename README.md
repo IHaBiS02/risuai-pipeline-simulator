@@ -64,7 +64,7 @@ python3 -m http.server 8080
 cd risu-sim && node test.js
 # → 129 passed, 0 failed
 
-# 브라우저 UI 통합 테스트 (파일 주입 + 클릭 103개 항목)
+# 브라우저 UI 통합 테스트 (파일 주입 + 클릭 104개 항목)
 python3 -m http.server 8901 &
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"

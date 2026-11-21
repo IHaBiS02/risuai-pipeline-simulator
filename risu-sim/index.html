@@ -317,22 +317,20 @@
   .ib-msg.bad { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3); color: #fca5a5; }
 
   /* ---- 채팅 프리뷰 ---- */
-  .chatlog { display: flex; flex-direction: column; gap: 12px; }
-  .chatrow { display: flex; gap: 10px; align-items: flex-start; }
-  .chatrow.user { flex-direction: row-reverse; }
+  /* 말풍선 없이 전체 폭 — 카드 UI 봇이 실제 채팅과 같은 레이아웃을 갖도록 */
+  .msgwrap { position: relative; z-index: 1; padding: 4px 2px 8px; }
+  .msghead {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 0 10px; font-size: 12px; color: var(--muted); font-weight: 600;
+  }
+  .msghead.hide { display: none; }
   .avatar {
-    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    width: 26px; height: 26px; border-radius: 50%; flex: none;
     background: #1d2635; border: 1px solid var(--line);
     display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 14px; color: #9fd7ff;
+    font-weight: 700; font-size: 12px; color: #9fd7ff;
   }
-  .chatrow.user .avatar { color: #ffd5a3; }
-  .bubble {
-    min-width: 0; max-width: calc(100% - 46px);
-    background: #111823; border: 1px solid var(--line);
-    border-radius: 12px; padding: 9px 12px;
-  }
-  .bubble .bname { font-size: 11.5px; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
+  .chattext { min-width: 0; }
   .empty-hint { color: var(--muted); font-size: 12.5px; padding: 10px; text-align: center; }
 </style>
 </head>
@@ -411,6 +409,7 @@
         <label class="chk"><input type="checkbox" id="featTriggers" checked> 트리거 실행</label>
         <label class="chk"><input type="checkbox" id="featLua" checked> Lua 실행</label>
         <label class="chk"><input type="checkbox" id="featPersist" checked> 변수 유지</label>
+        <label class="chk" title="결과 위에 봇 이름/아이콘 머리말을 표시합니다 (실제 채팅에는 없는 경우가 많습니다)"><input type="checkbox" id="featHead"> 이름·아바타</label>
       </div>
       <div class="ib-note">
         <b>변수 유지</b>를 켜면 실행 결과로 바뀐 변수·트리거 scriptstate 가 다음 실행으로 이어집니다
@@ -557,6 +556,7 @@
       <button data-pane="trace" class="active">트레이스</button>
       <button data-pane="preview">결과</button>
       <button data-pane="css">스코프된 CSS</button>
+      <button data-pane="bg">배경</button>
       <button data-pane="vars">변수</button>
       <span class="tabopt seg-lab">보기</span>
       <div class="seg" id="viewSeg">
@@ -572,19 +572,24 @@
     <div class="pane" id="pane-preview">
       <div id="previewWrap">
         <div id="bgLayer" class="chattext"></div>
-        <div class="chatlog">
-          <div class="chatrow" id="chatRow">
-            <div class="avatar" id="chatAvatar">R</div>
-            <div class="bubble">
-              <div class="bname" id="chatName">Risu</div>
-              <div class="chattext" id="preview"></div>
-            </div>
+        <div class="msgwrap">
+          <div class="msghead" id="msgHead">
+            <span class="avatar" id="chatAvatar">R</span>
+            <span id="chatName">Risu</span>
           </div>
+          <div class="chattext" id="preview"></div>
         </div>
       </div>
       <pre id="htmlOut" class="htmlview"></pre>
     </div>
     <div class="pane" id="pane-css"><pre id="cssOut"></pre></div>
+    <div class="pane" id="pane-bg">
+      <div class="stat" id="bgStat"></div>
+      <div class="pre-label">배경 (backgroundHTML + module.backgroundEmbedding)</div>
+      <pre id="bgHtml"></pre>
+      <div class="pre-label">배경 스코프 CSS</div>
+      <pre id="bgCss"></pre>
+    </div>
     <div class="pane" id="pane-vars">
       <div class="varsec">
         <div class="varhead"><b>채팅 변수</b><span class="hint">chat.variables · {{getvar::x}}</span>
@@ -858,6 +863,17 @@
     renderVarEditor();
   }
 
+  // 결과에 남아 있는 에셋 태그 = 해석 실패 (이름이 목록에 없거나 크기 제한으로 빠짐)
+  var ASSET_TAG_SCAN = /\{\{(raw|path|img|image|video|audio|bgm|bg|emotion|asset|video-img|source)::(.+?)\}\}/g;
+  function unresolvedAssetTags(text) {
+    var out = [];
+    String(text || '').replace(ASSET_TAG_SCAN, function (f, type, name) {
+      out.push(type + ':' + name);
+      return '';
+    });
+    return out;
+  }
+
   function renderStats(result) {
     var ran = 0, changed = 0;
     result.trace.forEach(function (st) {
@@ -877,6 +893,14 @@
       (result.unsupported.length
         ? '<span class="badge warn">미지원 CBS ' + result.unsupported.length + '</span>'
         : '') +
+      (function () {
+        var miss = unresolvedAssetTags(result.finalText);
+        if (!miss.length) return '';
+        return (
+          '<span class="badge err" title="' + esc(miss.slice(0, 40).join('\n')) +
+          '">미해석 에셋 ' + miss.length + '</span>'
+        );
+      })() +
       (function () {
         var ar = null;
         result.trace.forEach(function (st) { if (st.assetResult) ar = st.assetResult; });
@@ -1172,10 +1196,40 @@
     try {
       var r = window.RisuSim.renderDisplay(parts.join('\n'), cfg);
       layer.innerHTML = r.html;
+      bgInfo = { html: r.html, css: r.css || '', source: parts.join('\n') };
     } catch (e) {
       layer.innerHTML = '';
+      bgInfo = { html: '', css: '', source: parts.join('\n'), error: String((e && e.message) || e) };
       console.error(e);
     }
+    renderBgTab();
+  }
+
+  var bgInfo = { html: '', css: '', source: '' };
+
+  function renderBgTab() {
+    var htmlHost = $('bgHtml');
+    var cssHost = $('bgCss');
+    if (!htmlHost) return;
+    var layer = $('bgLayer');
+    htmlHost.textContent = layer.innerHTML || '(배경 없음 — 카드에 backgroundHTML / module.backgroundEmbedding 이 없습니다)';
+    // <style> 안의 CSS 만 뽑아서 보여준다
+    var css = [];
+    var re = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+    var m;
+    var src = layer.innerHTML;
+    while ((m = re.exec(src))) css.push(m[1]);
+    cssHost.textContent = css.length ? css.join('\n') : '(배경 CSS 없음)';
+
+    var miss = unresolvedAssetTags(layer.innerHTML);
+    var tags = (layer.innerHTML.match(/<img\b/gi) || []).length;
+    $('bgStat').innerHTML =
+      '<span>배경 길이 <b>' + layer.innerHTML.length + '</b></span>' +
+      '<span>이미지 태그 <b>' + tags + '</b></span>' +
+      '<span>CSS <b>' + (cssHost.textContent.length) + '</b> bytes</span>' +
+      (miss.length
+        ? '<span class="badge err" title="' + esc(miss.join('\n')) + '">미해석 에셋 ' + miss.length + '</span>'
+        : '<span class="badge ok">에셋 해석 완료</span>');
   }
 
   function renderPreview(result) {
@@ -1184,7 +1238,7 @@
     // 채팅 말풍선: 입력 단계면 유저, 그 외에는 봇 발화로 보여준다
     var isUser = $('mode').value === 'editinput';
     var who = isUser ? ($('userName').value || 'User') : ($('charName').value || 'Char');
-    $('chatRow').className = 'chatrow' + (isUser ? ' user' : '');
+    $('msgHead').className = 'msghead' + ($('featHead').checked ? '' : ' hide');
     renderBackground();
 
     var av = $('chatAvatar');
