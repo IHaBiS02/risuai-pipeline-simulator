@@ -20,7 +20,9 @@ risu-sim/
 │   ├── fixtures/           위 스크립트로 만든 .risup / .charx / .module …
 │   ├── build-vendor.mjs    vendor/risu-core.js 생성 (원본 cbs.ts + 원본과 같은 버전 라이브러리)
 │   ├── build-css.mjs       vendor/risu-chat.css 생성 (원본 styles.css → Tailwind 컴파일)
-│   ├── ui-test.html        브라우저 UI 통합 테스트 121개 (iframe 안에서 실제 클릭, 실제 Lua)
+│   ├── ui-test.html        브라우저 UI 통합 테스트 124개 (iframe 안에서 실제 클릭, 실제 Lua)
+│   ├── perf-bench.html     성능 측정용 페이지 (큰 카드 크기의 가짜 데이터)
+│   ├── perf-run.mjs        성능 측정 실행기 (headless chromium + CDP)
 │   └── shot.html           스크린샷 촬영용 페이지
 ├── vendor/
 │   ├── wasmoon/        Lua 5.4 WASM 런타임 (index.js + glue.wasm)
@@ -118,13 +120,13 @@ node risu-sim/tools/make-fixtures.js
 ### 브라우저 UI 테스트
 
 `tools/ui-test.html` 은 `index.html` 을 iframe 으로 띄운 뒤 **실제로 파일을 넣고 버튼을 눌러**
-121개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
+124개 항목을 확인합니다 (`DataTransfer` 로 file input 에 주입 + 페이지 전역 드롭).
 
 ```bash
 cd risu-sim && python3 -m http.server 8901
 chromium --headless=new --no-sandbox --virtual-time-budget=60000 \
   --dump-dom "http://127.0.0.1:8901/tools/ui-test.html"
-# → <pre id="out">ALL PASS (121 checks)</pre>
+# → <pre id="out">ALL PASS (124 checks)</pre>
 ```
 
 ## 보기 모드 — 실제 이미지 / HTML 코드
@@ -219,6 +221,26 @@ caption / divider             → 라벨 / 구분선
   어차피 바뀐 결과가 안 보이는데, 시뮬레이터는 매번 다시 그리므로 오래된 결과가 남지 않게 했습니다.
 - 캐시가 맞으면 트레이스에 **⑤ 정규식 — 캐시 적중** 이 뜨고, 비교용으로 다시 돌린 결과가 다르면 ⚠ 로 알려 줍니다.
 - "캐시 비우기" 버튼 / `RisuSim.resetScriptCache()` / `RisuSim.setScriptCache(false)`
+
+## 성능
+
+큰 카드(정규식·Lua 수백 KB, 배경 HTML 50KB)에서 실행 한 번에 0.35~0.5초 걸리던 것을 약 0.08초로 줄였습니다.
+파이프라인 자체(원본과 같은 작업)는 원래 빨랐고, 시간은 대부분 시뮬레이터 화면에서 나갔습니다.
+
+| 원인 | 처리 |
+|---|---|
+| 트레이스가 정규식마다 after 를 마크다운·새니타이즈까지 미리 렌더 (접힌 칸 포함) | **펼칠 때 렌더** |
+| 오른쪽 결과가 바뀔 때마다 2단 그리드가 왼쪽의 큰 JSON 편집 칸까지 다시 배치 | 두 칸을 `contain: strict` 로 분리 |
+| 같은 값이어도 편집 칸·변수 행을 다시 씀 | 바뀔 때만 씀 |
+| 배경을 매 실행 다시 렌더 (Lua·트리거·정규식 한 번 더) | 배경 원문·변수·설정이 같으면 이전 결과 사용 |
+| 선택을 바꿀 때마다 에셋 blob URL 을 전부 해제·재생성 (수십 MB 복사 + 이미지 재디코딩) | 레코드당 한 번만 만들고, 파일을 목록에서 지울 때만 해제 |
+
+측정:
+
+```bash
+cd risu-sim && python3 -m http.server 8901 &
+node tools/perf-run.mjs 5      # 실행 버튼 5번: 벽시계 · 스크립트 · 스타일 · 레이아웃 시간
+```
 
 ## 카드 배경 (backgroundHTML)
 
@@ -455,7 +477,7 @@ CBS 함수는 원본 `src/ts/cbs.ts` 를 **수정 없이 번들**해 씁니다(2
 | 원본 테스트 | `parser/tests/cbs/*` 59개 + `trimMarkdownStyle` 11개 + `assetSrcSanitize` 2개 → 이식본에 그대로 실행 |
 | 차등 퍼징 | 무작위 CBS·마크다운 4000개를 **원본 `risuChatParser`/`ParseMarkdown`** 과 이식본에 넣어 출력·변수 비교 → 차이 0 |
 | `node test.js` | 157개 |
-| `tools/ui-test.html` | 121개 (실제 Lua 포함) |
+| `tools/ui-test.html` | 124개 (실제 Lua 포함) |
 
 ### 원본과 의도적으로 다른 부분
 

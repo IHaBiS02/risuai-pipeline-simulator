@@ -211,6 +211,15 @@
       d.getElementById('viewSeg').innerHTML.slice(0, 120));
     ok('실제 이미지 모드에서 프리뷰 표시', !d.getElementById('previewWrap').classList.contains('hide'));
     ok('실제 이미지 모드에서 HTML 숨김', !d.getElementById('htmlOut').classList.contains('show'));
+    var lazyBefore = d.querySelectorAll('#pane-trace .lazy-after').length;
+    ok('접힌 칸의 After 렌더는 미뤄 둠 (펼칠 때 그림)', lazyBefore > 0, 'lazy=' + lazyBefore);
+    // 모든 칸을 펼치면 그때 그려진다 (toggle 이벤트)
+    for (var pass = 0; pass < 3; pass++) {
+      Array.prototype.forEach.call(d.querySelectorAll('#pane-trace details:not(.srcbox)'), function (el) { el.open = true; });
+      await sleep(200);
+    }
+    ok('펼치면 모두 렌더됨', d.querySelectorAll('#pane-trace .lazy-after').length === 0,
+      'left=' + d.querySelectorAll('#pane-trace .lazy-after').length);
     var rendered = d.querySelectorAll('#pane-trace .rendered');
     ok('After 렌더 블록이 생성됨', rendered.length > 0, 'count=' + rendered.length);
     ok('소스 보기 토글 존재', d.querySelectorAll('#pane-trace details.srcbox').length > 0,
@@ -310,6 +319,14 @@
       var m = /<img src="(blob:[^"]+)"/.exec(ciHtml);
       return !!m && m[1].length > 10;
     })(), ciHtml.slice(0, 300));
+
+    // 다시 적용해도(선택 클릭) 같은 blob URL 을 계속 쓴다 — 이미지 재디코딩 없음
+    var srcBefore = (/<img src="(blob:[^"]+)"/.exec(ciHtml) || [])[1];
+    var selRow = d.querySelector('#list-character .ib-item.applied') || d.querySelector('#list-character .ib-item');
+    selRow.click();
+    await sleep(1500);
+    var srcAfter = (/<img src="(blob:[^"]+)"/.exec(d.getElementById('htmlOut').textContent) || [])[1];
+    ok('다시 적용해도 에셋 blob URL 유지', !!srcBefore && srcBefore === srcAfter, srcBefore + ' / ' + srcAfter);
 
     // ---------- 카드 배경 (backgroundHTML) ----------
     var bg = d.getElementById('bgLayer');

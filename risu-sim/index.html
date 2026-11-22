@@ -39,9 +39,14 @@
 
   main {
     display: grid;
-    grid-template-columns: minmax(380px, 42%) 1fr;
+    grid-template-columns: minmax(380px, 42%) minmax(0, 1fr);
     gap: 0;
     height: calc(100vh - 74px);
+  }
+  /* 두 칸을 서로 독립된 배치 단위로: 오른쪽 결과가 바뀌어도 왼쪽의 큰 JSON 편집 칸을 다시 배치하지 않는다
+     (큰 카드에서 실행마다 레이아웃 수백 ms 가 여기서 나갔다). 칸 높이가 main 으로 정해지는 넓은 화면에서만. */
+  @media (min-width: 1101px) {
+    .col { contain: strict; }
   }
   @media (max-width: 1100px) {
     main { grid-template-columns: 1fr; height: auto; }
@@ -717,7 +722,9 @@
   var $ = function (id) { return document.getElementById(id); };
 
   function setJson(el, errEl, val) {
-    el.value = typeof val === 'string' ? val : JSON.stringify(val, null, 2);
+    var text = typeof val === 'string' ? val : JSON.stringify(val, null, 2);
+    // 같은 값을 다시 넣어도 브라우저는 그 칸을 다시 배치한다 (큰 JSON 이면 수십 ms) → 바뀔 때만 쓴다
+    if (el.value !== text) el.value = text;
     errEl.className = 'err-box';
     errEl.textContent = '';
   }
@@ -787,7 +794,8 @@
 
   // 실행 사이에 유지되는 상태 (트리거가 바꾼 변수/scriptstate, 버튼 트리거)
   var live = { vars: {}, globalVars: {}, scriptstate: {}, chat: null, globalLore: null, loreOf: null };
-  var pendingCacheReset = false; // 사용자가 상태를 바꿨다 → 다음 실행 전에 표시 캐시 비움
+  var pendingCacheReset = false;
+  var cfgVersion = 0; // 정규식·트리거·설정이 바뀔 때마다 증가 (배경 재사용 판단) // 사용자가 상태를 바꿨다 → 다음 실행 전에 표시 캐시 비움
   var pendingManual = null; // 버튼 트리거 이름
   var lastVarsText = null; // 마지막으로 적용한 textarea 내용 (직접 수정 감지)
   var lastGvarsText = null;
@@ -984,6 +992,7 @@
     renderPreview(result, cfg);
     renderStats(result);
     renderVarEditor();
+    window.__simRuns = (window.__simRuns || 0) + 1; // tools/perf-run.mjs 가 실행 완료를 알기 위한 카운터
   }
 
   // 결과에 남아 있는 에셋 태그 = 해석 실패 (이름이 목록에 없거나 크기 제한으로 빠짐)
@@ -1045,9 +1054,35 @@
   // after 블록을 실제 채팅처럼 렌더한다 (자산 태그 → encodeStyle → markdown → 새니타이즈 → CSS 스코프).
   // 블록마다 스코프를 따로 줘서 카드 CSS 가 다른 단계와 섞이지 않게 한다.
   var afterSeq = 0;
+  // 렌더는 비싸다(마크다운 + 새니타이즈 + CSS 스코프). 정규식 수십 개의 after 를 매 실행마다 다 그리면
+  // 실행 시간의 절반 이상이 여기서 나간다 → 자리만 잡아 두고, 그 칸이 펼쳐질 때 그린다.
+  var lazyAfter = new Map();
+  var lazySeq = 0;
   function afterBlock(text, cfg, label) {
+    if (viewMode !== 'image' || text == null || text === '') return '<pre class="diff-after">' + esc(clip(text)) + '</pre>';
+    var k = ++lazySeq;
+    lazyAfter.set(k, { text: text, cfg: cfg, label: label });
+    return '<div class="lazy-after" data-lazy="' + k + '"></div>';
+  }
+  function isShown(el, root) {
+    for (var p = el.parentElement; p && p !== root; p = p.parentElement) {
+      if (p.tagName === 'DETAILS' && !p.open) return false;
+    }
+    return true;
+  }
+  function fillLazyAfter(root, host) {
+    Array.prototype.forEach.call(root.querySelectorAll('.lazy-after[data-lazy]'), function (el) {
+      if (!isShown(el, host)) return;
+      var k = Number(el.getAttribute('data-lazy'));
+      var job = lazyAfter.get(k);
+      lazyAfter.delete(k);
+      var tpl = document.createElement('template');
+      tpl.innerHTML = job ? afterBlockNow(job.text, job.cfg, job.label) : '';
+      el.replaceWith(tpl.content);
+    });
+  }
+  function afterBlockNow(text, cfg, label) {
     var raw = '<pre class="diff-after">' + esc(clip(text)) + '</pre>';
-    if (viewMode !== 'image' || text == null || text === '') return raw;
     var str = String(text);
     if (str.length > 40000) {
       return '<div class="rendered-note">After 렌더 생략 — 너무 깁니다 (' + str.length + '자)</div>' + raw;
@@ -1085,6 +1120,14 @@
     var host = $('pane-trace');
     var html = '';
     afterSeq = 0; // 블록 스코프 번호 초기화
+    lazyAfter = new Map();
+    if (!host.__lazyBound) {
+      host.__lazyBound = true;
+      // toggle 은 버블링되지 않아서 캡처로 받는다
+      host.addEventListener('toggle', function (ev) {
+        if (ev.target && ev.target.open) fillLazyAfter(ev.target, host);
+      }, true);
+    }
 
     result.trace.forEach(function (st) {
       var badge = st.skipped
@@ -1287,6 +1330,7 @@
     }
 
     host.innerHTML = html;
+    fillLazyAfter(host, host); // 이미 펼쳐진 칸만 지금 그림
   }
 
   // 카드 배경: character.backgroundHTML + 모듈 backgroundEmbedding
@@ -1310,6 +1354,10 @@
       return;
     }
     var source = parts.join('') + '\n' + modBg.join('\n');
+    // 원본 BackgroundDom 은 배경 원문·변수가 바뀔 때만 다시 그린다. 시뮬레이터도 같은 조건이면 이전 결과를 쓴다
+    // (큰 카드는 배경이 Lua·트리거·정규식을 한 번 더 타서 실행마다 100ms 넘게 들었다).
+    var bgKey = source + '\u0000' + JSON.stringify([live.vars, live.globalVars, live.scriptstate]) + '\u0000' + cfgVersion;
+    if (bgKey === bgInfo.key && layer.innerHTML) return;
     var seq = ++bgSeq;
     try {
       var bcfg = Object.assign({}, cfg || lastCfg || {}, {
@@ -1318,7 +1366,7 @@
       var r = await window.RisuSim.renderBackground(source, bcfg);
       if (seq !== bgSeq) return;
       layer.innerHTML = r.html;
-      bgInfo = { html: r.html, css: r.css || '', source: source };
+      bgInfo = { html: r.html, css: r.css || '', source: source, key: bgKey };
     } catch (e) {
       if (seq !== bgSeq) return;
       layer.innerHTML = '';
@@ -1502,19 +1550,20 @@
   var KIND_MULTI = { preset: false, character: false, module: true };
 
   // 불러온 카드의 이미지 에셋 → blob: URL (실제 <img> 로 렌더)
+  // 에셋 레코드 하나당 blob URL 은 한 번만 만들고, 그 파일을 목록에서 지울 때만 해제한다.
+  // (예전에는 선택을 바꿀 때마다 전부 해제·재생성 → 큰 카드는 매번 수십 MB 복사 + 이미지 전부 다시 디코딩)
   var assetUrls = {};
-  var assetUrlList = [];
 
-  function revokeAssetUrls() {
-    for (var i = 0; i < assetUrlList.length; i++) {
-      try {
-        URL.revokeObjectURL(assetUrlList[i]);
-      } catch (e) {
-        /* ignore */
-      }
-    }
-    assetUrlList = [];
-    assetUrls = {};
+  function liveAssetRecords() {
+    var live = new Set();
+    ['preset', 'character', 'module'].forEach(function (kind) {
+      store[kind].forEach(function (e) {
+        var d = e.assetsData;
+        if (d) Object.keys(d).forEach(function (n) { if (d[n]) live.add(d[n]); });
+        (e.assetList || []).forEach(function (x) { if (x && x.rec) live.add(x.rec); });
+      });
+    });
+    return live;
   }
 
   function b64ToBytes(b64) {
@@ -1537,7 +1586,6 @@
     try {
       var url = URL.createObjectURL(new Blob([buf], { type: a.mime || 'application/octet-stream' }));
       recUrl.set(a, url);
-      assetUrlList.push(url);
       return url;
     } catch (e) {
       return null;
@@ -1557,9 +1605,17 @@
   }
 
   function buildAssetUrls(entries) {
-    revokeAssetUrls();
-    recUrl = new Map();
-    recRef = new Map();
+    var live = liveAssetRecords();
+    recUrl.forEach(function (url, rec) {
+      if (live.has(rec)) return;
+      try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+      recUrl.delete(rec);
+      recRef.delete(rec);
+    });
+    assetUrls = {};
+    recRef.forEach(function (ref, rec) {
+      if (recUrl.has(rec)) assetUrls[ref] = recUrl.get(rec);
+    });
     entries.forEach(function (entry) {
       var data = entry && entry.assetsData;
       if (!data) return;
@@ -1758,6 +1814,7 @@
     });
     buildAssetUrls(urlSources);
 
+    cfgVersion++;
     pendingCacheReset = true; // modules.ts:584 모듈 구성이 바뀌면 ReloadGUIPointer
     renderTogglePanel();
     renderImportLists();
@@ -1964,11 +2021,10 @@
   function renderVarRows(hostId, obj, scope) {
     var host = $(hostId);
     var keys = Object.keys(obj || {});
+    var html;
     if (!keys.length) {
-      host.innerHTML = '<div class="var-empty">없음</div>';
-      return;
-    }
-    host.innerHTML = keys
+      html = '<div class="var-empty">없음</div>';
+    } else html = keys
       .map(function (k) {
         var v = obj[k];
         if (v != null && typeof v === 'object') v = JSON.stringify(v);
@@ -1981,6 +2037,11 @@
         );
       })
       .join('');
+    // 값이 그대로면 다시 그리지 않는다 (편집 중인 칸의 포커스도 유지)
+    if (host.__html !== html) {
+      host.innerHTML = html;
+      host.__html = html;
+    }
   }
 
   // 실행할 때마다 패널을 다시 만들면 조작 중인 컨트롤이 사라진다(포커스/체크 유실).
@@ -2016,7 +2077,8 @@
     renderVarRows('varRowsChat', live.vars, 'vars');
     renderVarRows('varRowsGlobal', live.globalVars, 'globalVars');
     var ss = live.scriptstate || {};
-    $('varsOut').textContent = Object.keys(ss).length ? JSON.stringify(ss, null, 2) : '(없음)';
+    var ssText = Object.keys(ss).length ? JSON.stringify(ss, null, 2) : '(없음)';
+    if ($('varsOut').textContent !== ssText) $('varsOut').textContent = ssText;
     $('varsOut').classList.add('show');
   }
 
@@ -2230,6 +2292,7 @@
   ['traceCbs', 'featTriggers', 'featLua', 'featPersist', 'featCache'].forEach(function (id) {
     if (!$(id)) return;
     $(id).addEventListener('change', function () {
+      cfgVersion++;
       run().catch(function (e) { console.error(e); });
     });
   });
@@ -2249,6 +2312,7 @@
       if (el.id && el.type !== 'file' && el.type !== 'radio' && el.type !== 'checkbox') {
         invalidateApplied(el.id);
       }
+      cfgVersion++;
       timer = setTimeout(function () { run().catch(function (e) { console.error(e); }); }, 250);
     });
   });

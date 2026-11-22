@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>risu-sim 성능 측정</title>
+<!--
+  큰 카드와 비슷한 크기의 가짜 데이터(정규식 ~110KB, Lua ~75KB, 배경 ~50KB, 본문 ~27KB)를
+  모듈 JSON 하나로 만들어 실제 '파일 추가' 경로로 넣고, 실행 버튼을 여러 번 눌러 시간을 잰다.
+  결과는 #out 에 JSON 으로 남는다 (레이아웃·스타일 시간은 CDP Performance.getMetrics 로 바깥에서 잰다).
+    python3 -m http.server 8901  →  http://127.0.0.1:8901/tools/perf-bench.html
+-->
+<pre id="out">running</pre>
+<iframe id="f" src="../index.html" style="width:1400px;height:900px"></iframe>
+<script>
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  function bigModule() {
+    var regex = [];
+    for (var i = 0; i < 160; i++) {
+      regex.push({
+        comment: '정규식 ' + i + ' — ' + 'x'.repeat(200),
+        type: i % 3 === 0 ? 'editdisplay' : i % 3 === 1 ? 'editoutput' : 'editprocess',
+        in: '\\[TAG' + i + '\\|([^\\]]*)\\]',
+        out: '<div class="tag' + i + '">{{#if {{? {{getglobalvar::toggle_t' + i + '}}=1 }}}}$1{{/if}}</div>' + ' '.repeat(300),
+        ableFlag: true,
+        flag: 'g'
+      });
+    }
+    // 실제 카드처럼 한 줄짜리 긴 out (CSS 를 통째로 넣은 정규식)
+    for (var k = 0; k < 40; k++) {
+      regex.push({
+        comment: '긴 CSS ' + k, type: 'editoutput', in: '<ui' + k + '>', ableFlag: true, flag: 'g',
+        out: '<style>' + Array.from({ length: 60 }, function (_, q) { return '.u' + k + '-' + q + '{margin:' + q + 'px;background:linear-gradient(180deg,#123,#456)}'; }).join('') + '</style><div class="u' + k + '">$&</div>'
+      });
+    }
+    var lua = '-- 큰 Lua\n' + Array.from({ length: 1500 }, function (_, i) { return 'local v' + i + ' = ' + i + ' -- ' + 'c'.repeat(30); }).join('\n') +
+      "\nlistenEdit('editDisplay', function(id, v) return v end)\n";
+    var css = Array.from({ length: 600 }, function (_, i) { return '.b' + i + '{color:#' + (100000 + i) + ';padding:' + (i % 9) + 'px}'; }).join('');
+    var bg = '<style>' + css + '</style>' + Array.from({ length: 300 }, function (_, i) { return '<div class="b' + i + '">{{getvar::hp}} ' + i + '</div>'; }).join('');
+    return {
+      type: 'risuModule', name: 'Bench Module', description: '', id: '00000000-0000-4000-8000-0000000000be',
+      regex: regex,
+      trigger: [
+        { comment: 'lua', type: 'start', conditions: [], effect: [{ type: 'triggerlua', code: lua }] },
+        { comment: 'disp', type: 'display', conditions: [], effect: [{ type: 'v2ConsoleLog', source: 'd', sourceType: 'value', indent: 0 }] }
+      ],
+      lorebook: [],
+      backgroundEmbedding: bg,
+      customModuleToggle: Array.from({ length: 120 }, function (_, i) { return 't' + i + '=토글 ' + i; }).join('\n')
+    };
+  }
+
+  document.getElementById('f').addEventListener('load', async function () {
+    var w = document.getElementById('f').contentWindow;
+    var d = w.document;
+    var out = {};
+    for (var i = 0; i < 100 && !/실행된 스크립트/.test((d.getElementById('stat') || {}).textContent || ''); i++) await sleep(100);
+
+    var json = JSON.stringify(bigModule());
+    var t0 = performance.now();
+    var inp = d.getElementById('file-module');
+    var dt = new w.DataTransfer();
+    dt.items.add(new w.File([json], 'bench.json'));
+    inp.files = dt.files;
+    inp.dispatchEvent(new w.Event('change', { bubbles: true }));
+    for (var j = 0; j < 400 && !/불러옴|실패/.test(d.getElementById('importMsg').textContent); j++) await sleep(10);
+    await sleep(1500);
+    out.import = Math.round(performance.now() - t0);
+
+    d.getElementById('input').value = Array.from({ length: 300 }, function (_, i) { return '본문 줄 ' + i + ' [TAG' + (i % 160) + '|내용 ' + i + '] {{getvar::hp}}'; }).join('\n');
+    window.__w = w;
+    window.__d = d;
+    out.sizes = {};
+    Array.prototype.forEach.call(d.querySelectorAll('textarea'), function (t) { if (t.value.length > 1000) out.sizes[t.id] = t.value.length; });
+    document.getElementById('out').textContent = 'LOADED ' + JSON.stringify(out);
+  });
+</script>
